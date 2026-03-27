@@ -72,12 +72,12 @@ public enum GraphStructure {
             Object... entities) {
         var declarativeShadowVariableDescriptors = solutionDescriptor.getDeclarativeShadowVariableDescriptors();
         if (declarativeShadowVariableDescriptors.isEmpty()) {
-            LOGGER.info("Graph structure: EMPTY (no declarative shadow variables)");
+            LOGGER.trace("Graph structure: EMPTY (no declarative shadow variables)");
             return new GraphStructureAndDirection(EMPTY, null, null);
         }
 
         if (!doEntitiesUseDeclarativeShadowVariables(declarativeShadowVariableDescriptors, entities)) {
-            LOGGER.info("Graph structure: EMPTY (no entities use declarative shadow variables)");
+            LOGGER.trace("Graph structure: EMPTY (no entities use declarative shadow variables)");
             return new GraphStructureAndDirection(EMPTY, null, null);
         }
 
@@ -118,7 +118,7 @@ public enum GraphStructure {
                                 parentMetaModel = groupParentVariableMetamodel;
                             } else if (!parentMetaModel
                                     .equals(variableSource.variableSourceReferences().get(0).variableMetaModel())) {
-                                LOGGER.info("Graph structure: ARBITRARY (conflicting group parent meta-models)");
+                                LOGGER.trace("Graph structure: ARBITRARY (conflicting group parent meta-models)");
                                 return new GraphStructureAndDirection(GraphStructure.ARBITRARY, null, null);
                             }
                         }
@@ -139,7 +139,7 @@ public enum GraphStructure {
                         directionalType = parentVariableType;
                         directionalEntityClass = variableSource.rootEntity();
                     } else if (!parentMetaModel.equals(variableSource.variableSourceReferences().get(0).variableMetaModel())) {
-                        LOGGER.info("Graph structure: ARBITRARY (conflicting directional parent meta-models)");
+                        LOGGER.trace("Graph structure: ARBITRARY (conflicting directional parent meta-models)");
                         return new GraphStructureAndDirection(GraphStructure.ARBITRARY, null, null);
                     }
                 }
@@ -190,28 +190,28 @@ public enum GraphStructure {
                                 || type == ParentVariableType.NO_PARENT);
 
                 if (directionalEntitySafe && nonDirectionalEntitySafe) {
-                    LOGGER.info("Graph structure: MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT (direction={}, parentMetaModel={})",
+                    LOGGER.trace("Graph structure: MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT (direction={}, parentMetaModel={})",
                             directionalType, parentMetaModel);
                     return new GraphStructureAndDirection(
                             MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT, parentMetaModel, directionalType);
                 }
             }
-            LOGGER.info("Graph structure: {} (arbitrary fallback)", arbitraryGraphStructure.structure());
+            LOGGER.trace("Graph structure: {} (arbitrary fallback)", arbitraryGraphStructure.structure());
             return arbitraryGraphStructure;
         }
 
         if (directionalType == null) {
-            LOGGER.info("Graph structure: NO_DYNAMIC_EDGES");
+            LOGGER.trace("Graph structure: NO_DYNAMIC_EDGES");
             return new GraphStructureAndDirection(NO_DYNAMIC_EDGES, null, null);
         } else if (multipleDeclarativeEntityClasses) {
             // Multiple entity classes but no VARIABLE/GROUP/INDIRECT/INVERSE sources.
             // This shouldn't normally happen, but fall back to arbitrary for safety.
-            LOGGER.info("Graph structure: {} (multiple entity classes, unexpected fallback)",
+            LOGGER.trace("Graph structure: {} (multiple entity classes, unexpected fallback)",
                     arbitraryGraphStructure.structure());
             return arbitraryGraphStructure;
         } else {
             // Cannot use a single successor function if there are multiple entity classes
-            LOGGER.info("Graph structure: SINGLE_DIRECTIONAL_PARENT (direction={}, parentMetaModel={})",
+            LOGGER.trace("Graph structure: SINGLE_DIRECTIONAL_PARENT (direction={}, parentMetaModel={})",
                     directionalType, parentMetaModel);
             return new GraphStructureAndDirection(SINGLE_DIRECTIONAL_PARENT, parentMetaModel, directionalType);
         }
