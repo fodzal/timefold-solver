@@ -14,7 +14,6 @@ import ai.timefold.solver.core.config.heuristic.selector.common.SelectionCacheTy
 import ai.timefold.solver.core.config.heuristic.selector.common.SelectionOrder;
 import ai.timefold.solver.core.config.heuristic.selector.common.decorator.SelectionSorterOrder;
 import ai.timefold.solver.core.config.heuristic.selector.value.ValueSelectorConfig;
-import ai.timefold.solver.core.enterprise.TimefoldSolverEnterpriseService;
 import ai.timefold.solver.core.impl.domain.entity.descriptor.EntityDescriptor;
 import ai.timefold.solver.core.impl.domain.variable.descriptor.BasicVariableDescriptor;
 import ai.timefold.solver.core.impl.domain.variable.descriptor.GenuineVariableDescriptor;
@@ -496,9 +495,40 @@ public class ValueSelectorFactory<Solution_>
     private ValueSelector<Solution_> applyNearbySelection(HeuristicConfigPolicy<Solution_> configPolicy,
             EntityDescriptor<Solution_> entityDescriptor, SelectionCacheType minimumCacheType,
             SelectionOrder resolvedSelectionOrder, ValueSelector<Solution_> valueSelector) {
-        return TimefoldSolverEnterpriseService.loadOrFail(TimefoldSolverEnterpriseService.Feature.NEARBY_SELECTION)
-                .applyNearbySelection(config, configPolicy, entityDescriptor, minimumCacheType, resolvedSelectionOrder,
-                        valueSelector);
+        var nearbySelectionConfig = config.getNearbySelectionConfig();
+        boolean randomSelection = resolvedSelectionOrder.toRandomSelectionBoolean();
+        var nearbyDistanceMeter = configPolicy.getClassInstanceCache().newInstance(nearbySelectionConfig,
+                "nearbyDistanceMeterClass", nearbySelectionConfig.getNearbyDistanceMeterClass());
+        var nearbyRandom = ai.timefold.solver.core.impl.heuristic.selector.common.nearby.NearbyRandomFactory
+                .create(nearbySelectionConfig).buildNearbyRandom(randomSelection);
+        if (nearbySelectionConfig.getOriginEntitySelectorConfig() != null) {
+            var originEntitySelector = ai.timefold.solver.core.impl.heuristic.selector.entity.EntitySelectorFactory
+                    .<Solution_> create(nearbySelectionConfig.getOriginEntitySelectorConfig())
+                    .buildEntitySelector(configPolicy, minimumCacheType, resolvedSelectionOrder);
+            return new ai.timefold.solver.core.impl.heuristic.selector.value.nearby.NearEntityNearbyValueSelector<>(
+                    valueSelector, originEntitySelector, nearbyDistanceMeter, nearbyRandom, randomSelection);
+        } else if (nearbySelectionConfig.getOriginValueSelectorConfig() != null) {
+            var originValueSelector =
+                    ValueSelectorFactory.<Solution_> create(nearbySelectionConfig.getOriginValueSelectorConfig())
+                            .buildValueSelector(configPolicy, entityDescriptor, minimumCacheType, resolvedSelectionOrder);
+            if (!(valueSelector instanceof IterableValueSelector)) {
+                throw new IllegalArgumentException("The valueSelectorConfig (" + config
+                        + ") needs to be based on an IterableValueSelector (" + valueSelector + ").");
+            }
+            if (!(originValueSelector instanceof IterableValueSelector)) {
+                throw new IllegalArgumentException("The originValueSelectorConfig ("
+                        + nearbySelectionConfig.getOriginValueSelectorConfig()
+                        + ") needs to be based on an IterableValueSelector (" + originValueSelector + ").");
+            }
+            return new ai.timefold.solver.core.impl.heuristic.selector.value.nearby.NearValueNearbyValueSelector<>(
+                    (IterableValueSelector<Solution_>) valueSelector,
+                    (IterableValueSelector<Solution_>) originValueSelector,
+                    nearbyDistanceMeter, nearbyRandom, randomSelection);
+        } else {
+            throw new IllegalArgumentException("The valueSelector (" + config
+                    + ")'s nearbySelectionConfig (" + nearbySelectionConfig
+                    + ") requires an originEntitySelector or an originValueSelector.");
+        }
     }
 
     private ValueSelector<Solution_> applyMimicRecording(HeuristicConfigPolicy<Solution_> configPolicy,

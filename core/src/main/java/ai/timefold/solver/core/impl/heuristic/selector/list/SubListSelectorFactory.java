@@ -7,7 +7,6 @@ import ai.timefold.solver.core.config.heuristic.selector.common.SelectionOrder;
 import ai.timefold.solver.core.config.heuristic.selector.common.nearby.NearbySelectionConfig;
 import ai.timefold.solver.core.config.heuristic.selector.list.SubListSelectorConfig;
 import ai.timefold.solver.core.config.heuristic.selector.value.ValueSelectorConfig;
-import ai.timefold.solver.core.enterprise.TimefoldSolverEnterpriseService;
 import ai.timefold.solver.core.impl.AbstractFromConfigFactory;
 import ai.timefold.solver.core.impl.domain.entity.descriptor.EntityDescriptor;
 import ai.timefold.solver.core.impl.heuristic.HeuristicConfigPolicy;
@@ -102,8 +101,21 @@ public final class SubListSelectorFactory<Solution_> extends AbstractFromConfigF
         if (nearbySelectionConfig == null) {
             return subListSelector;
         }
-        return TimefoldSolverEnterpriseService.loadOrFail(TimefoldSolverEnterpriseService.Feature.NEARBY_SELECTION)
-                .applyNearbySelection(config, configPolicy, minimumCacheType, resolvedSelectionOrder, subListSelector);
+        nearbySelectionConfig.validateNearby(minimumCacheType, resolvedSelectionOrder);
+        boolean randomSelection = resolvedSelectionOrder.toRandomSelectionBoolean();
+        var nearbyDistanceMeter = configPolicy.getClassInstanceCache().newInstance(nearbySelectionConfig,
+                "nearbyDistanceMeterClass", nearbySelectionConfig.getNearbyDistanceMeterClass());
+        var nearbyRandom = ai.timefold.solver.core.impl.heuristic.selector.common.nearby.NearbyRandomFactory
+                .create(nearbySelectionConfig).buildNearbyRandom(randomSelection);
+        if (nearbySelectionConfig.getOriginSubListSelectorConfig() == null) {
+            throw new IllegalArgumentException("The subListSelector (" + config
+                    + ")'s nearbySelectionConfig (" + nearbySelectionConfig + ") requires an originSubListSelector.");
+        }
+        var replayingOriginSubListSelector =
+                SubListSelectorFactory.<Solution_> create(nearbySelectionConfig.getOriginSubListSelectorConfig())
+                        .buildSubListSelector(configPolicy, null, minimumCacheType, resolvedSelectionOrder);
+        return new ai.timefold.solver.core.impl.heuristic.selector.list.nearby.NearSubListNearbySubListSelector<>(
+                subListSelector, replayingOriginSubListSelector, nearbyDistanceMeter, nearbyRandom);
     }
 
     private IterableValueSelector<Solution_> buildIterableValueSelector(
