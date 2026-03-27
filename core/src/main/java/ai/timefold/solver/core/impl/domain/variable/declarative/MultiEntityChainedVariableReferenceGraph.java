@@ -240,6 +240,13 @@ public final class MultiEntityChainedVariableReferenceGraph<Solution_> implement
                     if (existing == null || chainOrderComparator.compare(entity, existing) < 0) {
                         fixedEntityToDirtyChainStart.put(fixedParent, entity);
                     }
+                } else {
+                    // Visit was unassigned (e.g., during undo). Reset its shadow variables
+                    // to null so that re-assigning the same visit to the same position will
+                    // correctly detect a change and propagate to subsequent visits.
+                    for (var updater : chainedUpdaters) {
+                        updater.updateIfChanged(entity, changedVariableNotifier);
+                    }
                 }
             }
         }
