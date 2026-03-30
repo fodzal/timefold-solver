@@ -225,9 +225,10 @@ public final class MultiEntityChainedVariableReferenceGraph<Solution_> implement
         }
         isUpdating = true;
 
-        // Group changed entities: find dirty fixed entities and earliest dirty chained entity per fixed entity
+        // Group changed entities: find dirty fixed entities and earliest/latest dirty chained entity per fixed entity
         var dirtyFixedEntities = Collections.newSetFromMap(new IdentityHashMap<Object, Boolean>());
         var fixedEntityToDirtyChainStart = new IdentityHashMap<Object, Object>();
+        var fixedEntityToDirtyChainEnd = new IdentityHashMap<Object, Object>();
 
         for (var entity : changedEntities) {
             if (fixedEntityClass.isInstance(entity)) {
@@ -236,9 +237,13 @@ public final class MultiEntityChainedVariableReferenceGraph<Solution_> implement
                 var fixedParent = entityToFixedParent.apply(entity);
                 if (fixedParent != null) {
                     dirtyFixedEntities.add(fixedParent);
-                    var existing = fixedEntityToDirtyChainStart.get(fixedParent);
-                    if (existing == null || chainOrderComparator.compare(entity, existing) < 0) {
+                    var existingStart = fixedEntityToDirtyChainStart.get(fixedParent);
+                    if (existingStart == null || chainOrderComparator.compare(entity, existingStart) < 0) {
                         fixedEntityToDirtyChainStart.put(fixedParent, entity);
+                    }
+                    var existingEnd = fixedEntityToDirtyChainEnd.get(fixedParent);
+                    if (existingEnd == null || chainOrderComparator.compare(entity, existingEnd) > 0) {
+                        fixedEntityToDirtyChainEnd.put(fixedParent, entity);
                     }
                 } else {
                     // Visit was unassigned (e.g., during undo). Reset its shadow variables
@@ -274,8 +279,9 @@ public final class MultiEntityChainedVariableReferenceGraph<Solution_> implement
                 preChainChanged |= updater.updateIfChanged(fixedEntity, changedVariableNotifier);
             }
 
-            // 2. Determine chain start
+            // 2. Determine chain start and end
             var dirtyChainStart = fixedEntityToDirtyChainStart.get(fixedEntity);
+            var dirtyChainEnd = fixedEntityToDirtyChainEnd.get(fixedEntity);
             var chainStart = dirtyChainStart;
             if (preChainChanged) {
                 // Predecessor data changed -> recompute visits from the first chained entity,
@@ -288,8 +294,8 @@ public final class MultiEntityChainedVariableReferenceGraph<Solution_> implement
                 }
             }
 
-            LOGGER.trace("  fixedEntity={}: preChainChanged={}, chainStart={}, dirtyChainStart={}",
-                    fixedEntity, preChainChanged, chainStart, dirtyChainStart);
+            LOGGER.trace("  fixedEntity={}: preChainChanged={}, chainStart={}, dirtyChainStart={}, dirtyChainEnd={}",
+                    fixedEntity, preChainChanged, chainStart, dirtyChainStart, dirtyChainEnd);
 
             // 3. Walk the chained entity chain with short-circuit
             if (chainStart != null) {
@@ -300,12 +306,14 @@ public final class MultiEntityChainedVariableReferenceGraph<Solution_> implement
                         anyChanged |= updater.updateIfChanged(current, changedVariableNotifier);
                     }
                     if (canTerminateEarly && !anyChanged) {
-                        // Don't terminate early if there's a dirty chain start we haven't reached yet.
-                        // This can happen when preChainChanged overrode chainStart to firstChained,
-                        // but the actual dirty visits are further in the chain (e.g., a visit was moved
-                        // into this vehicle at a later position).
-                        if (dirtyChainStart == null
-                                || chainOrderComparator.compare(current, dirtyChainStart) >= 0) {
+                        // Don't terminate early if we haven't reached the LAST dirty visit yet.
+                        // A swap can create multiple non-contiguous dirty visits on the same vehicle.
+                        // If an earlier dirty visit coincidentally produces the same values,
+                        // we still need to reach the later dirty visit which may have different values
+                        // (e.g., different location after swap).
+                        boolean pastAllDirtyVisits =
+                                (dirtyChainEnd == null || chainOrderComparator.compare(current, dirtyChainEnd) >= 0);
+                        if (pastAllDirtyVisits) {
                             LOGGER.trace("    chain walk early termination at {}", current);
                             break;
                         }
