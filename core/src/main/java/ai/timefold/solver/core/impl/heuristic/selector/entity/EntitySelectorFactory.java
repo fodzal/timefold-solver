@@ -111,19 +111,11 @@ public class EntitySelectorFactory<Solution_> extends AbstractSelectorFactory<So
                 baseRandomSelection);
         var instanceCache = configPolicy.getClassInstanceCache();
         if (nearbySelectionConfig != null) {
-            // TODO Static filtering (such as movableEntitySelectionFilter) should affect nearbySelection
+            // Nearby selection replaces entity value range filtering.
+            // Value range enforcement is handled by PossibleMoveFilter at the move level instead.
             entitySelector = applyNearbySelection(configPolicy, nearbySelectionConfig, minimumCacheType,
                     resolvedSelectionOrder, entitySelector);
         } else {
-            // The nearby selector will implement its own logic to filter out unreachable elements.
-            // Therefore, we only apply entity value range filtering if the nearby feature is not enabled;
-            // otherwise, we would end up applying the filtering logic twice.
-            // The range-filtering node will use the ReachableValues structure
-            // to fetch and iterate only over the values that are reachable from the current selection.
-            // It is expected that the size of the reachable values will be smaller than that of the filtering node
-            // created by the applyFiltering function.
-            // Therefore, we first create the range-filtering node,
-            // and then we apply the usual filtering node decorator.
             entitySelector = applyEntityValueRangeFiltering(configPolicy, entitySelector, valueRangeRecorderId,
                     minimumCacheType, inheritedSelectionOrder, baseRandomSelection);
         }

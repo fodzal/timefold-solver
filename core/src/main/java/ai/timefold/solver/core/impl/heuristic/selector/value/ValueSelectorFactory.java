@@ -126,15 +126,13 @@ public class ValueSelectorFactory<Solution_>
         var valueSelector = buildBaseValueSelector(variableDescriptor, sorter,
                 SelectionCacheType.max(minimumCacheType, resolvedCacheType), randomSelection);
         if (nearbySelectionConfig != null) {
-            // TODO Static filtering (such as movableEntitySelectionFilter) should affect nearbySelection too
+            // Nearby selection replaces entity value range filtering.
+            // The nearby distance matrix needs to iterate over ALL values to build the matrix;
+            // value range filtering would interfere by requiring the mimic pattern to be active.
+            // Value range enforcement is handled by PossibleMoveFilter at the move level instead.
             valueSelector = applyNearbySelection(configPolicy, entityDescriptor, minimumCacheType,
                     resolvedSelectionOrder, valueSelector);
         } else {
-            /*
-             * The nearby selector will implement its own logic to filter out unreachable elements.
-             * Therefore, we only apply entity value range filtering if the nearby feature is not enabled;
-             * otherwise, we would end up applying the filtering logic twice.
-             */
             valueSelector = applyValueRangeFiltering(configPolicy, valueSelector, entityDescriptor, minimumCacheType,
                     inheritedSelectionOrder, randomSelection, entityValueRangeRecorderId, assertBothSides);
         }

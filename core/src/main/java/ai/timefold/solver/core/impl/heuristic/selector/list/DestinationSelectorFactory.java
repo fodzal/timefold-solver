@@ -134,7 +134,10 @@ public final class DestinationSelectorFactory<Solution_> extends AbstractSelecto
         }
         nearbySelectionConfig.validateNearby(minimumCacheType, selectionOrder);
         boolean randomSelection = selectionOrder.toRandomSelectionBoolean();
-        // The nearby selector will implement its own logic to filter out unreachable elements.
+        // When entity value range filtering is enabled, create a new destination selector WITHOUT it.
+        // The nearby distance matrix needs to iterate ALL values via endingIterator();
+        // value range filtering would interfere by requiring the mimic recording pattern to be active.
+        // Value range enforcement is handled by PossibleMoveFilter at the move level instead.
         ElementDestinationSelector<Solution_> effectiveDestinationSelector;
         if (enableEntityValueRange) {
             var entitySelector =
