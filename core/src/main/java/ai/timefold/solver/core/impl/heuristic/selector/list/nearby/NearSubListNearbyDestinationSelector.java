@@ -43,12 +43,13 @@ public final class NearSubListNearbyDestinationSelector<Solution_>
             SubList subList = (SubList) i.next();
             return firstElement(subList);
         };
+        long destinationSize = computeDestinationSize();
         if (!randomSelection) {
             return new OriginalNearbyDestinationIterator(nearbyDistanceMatrix, replayingOriginSubListIterator, originFunction,
-                    this::toElementPosition, childSelector.getSize());
+                    this::toElementPosition, destinationSize);
         } else {
             return new RandomNearbyDestinationIterator(nearbyDistanceMatrix, nearbyRandom, workingRandom,
-                    replayingOriginSubListIterator, originFunction, this::toElementPosition, childSelector.getSize());
+                    replayingOriginSubListIterator, originFunction, this::toElementPosition, destinationSize);
         }
     }
 

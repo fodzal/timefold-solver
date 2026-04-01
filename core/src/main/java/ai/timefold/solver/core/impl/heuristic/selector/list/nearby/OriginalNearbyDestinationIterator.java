@@ -13,14 +13,15 @@ final class OriginalNearbyDestinationIterator extends SelectionIterator<ElementP
     private final Iterator<?> replayingOriginIterator;
     private final Function<Iterator<?>, Object> originFunction;
     private final Function<Object, ElementPosition> elementPositionFunction;
-    private final long childSize;
     private boolean originSelected = false;
     private boolean originIsNotEmpty;
     private Object origin;
+    private int destinationSize;
     private int nextNearbyIndex;
 
     public OriginalNearbyDestinationIterator(NearbyDistanceMatrix<Object, Object> nearbyDistanceMatrix,
-            Iterator<?> replayingOriginIterator, Function<Object, ElementPosition> elementPositionFunction, long childSize) {
+            Iterator<?> replayingOriginIterator, Function<Object, ElementPosition> elementPositionFunction,
+            long childSize) {
         this(nearbyDistanceMatrix, replayingOriginIterator, Iterator::next, elementPositionFunction, childSize);
     }
 
@@ -31,7 +32,8 @@ final class OriginalNearbyDestinationIterator extends SelectionIterator<ElementP
         this.replayingOriginIterator = replayingOriginIterator;
         this.originFunction = originFunction;
         this.elementPositionFunction = elementPositionFunction;
-        this.childSize = childSize;
+        // childSize is a hint; actual limit per origin comes from the matrix
+        this.destinationSize = 0;
         nextNearbyIndex = 0;
     }
 
@@ -40,13 +42,17 @@ final class OriginalNearbyDestinationIterator extends SelectionIterator<ElementP
             return;
         originIsNotEmpty = replayingOriginIterator.hasNext();
         origin = originFunction.apply(replayingOriginIterator);
+        if (originIsNotEmpty) {
+            // Use the actual matrix size for this origin, not the dynamic childSelector size
+            destinationSize = nearbyDistanceMatrix.getDestinationSize(origin);
+        }
         originSelected = true;
     }
 
     @Override
     public boolean hasNext() {
         selectOrigin();
-        return originIsNotEmpty && nextNearbyIndex < childSize;
+        return originIsNotEmpty && nextNearbyIndex < destinationSize;
     }
 
     @Override

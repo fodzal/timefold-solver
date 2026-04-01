@@ -66,4 +66,17 @@ public final class NearbyDistanceMatrix<Origin, Destination> implements Supply {
         }
         return destinations[nearbyIndex];
     }
+
+    /**
+     * Returns the number of destinations stored for the given origin.
+     * This may differ from the child selector's dynamic size (e.g. during construction heuristic).
+     */
+    public int getDestinationSize(Origin origin) {
+        Destination[] destinations = originToDestinationsMap.get(origin);
+        if (destinations == null) {
+            addAllDestinations(origin);
+            destinations = originToDestinationsMap.get(origin);
+        }
+        return destinations.length;
+    }
 }

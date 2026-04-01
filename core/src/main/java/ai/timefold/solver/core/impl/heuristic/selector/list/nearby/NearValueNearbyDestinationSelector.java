@@ -37,12 +37,13 @@ public final class NearValueNearbyDestinationSelector<Solution_>
     @Override
     public Iterator<ElementPosition> iterator() {
         Iterator<Object> replayingOriginValueIterator = replayingSelector.iterator();
+        long destinationSize = computeDestinationSize();
         if (!randomSelection) {
             return new OriginalNearbyDestinationIterator(nearbyDistanceMatrix, replayingOriginValueIterator,
-                    this::toElementPosition, childSelector.getSize());
+                    this::toElementPosition, destinationSize);
         } else {
             return new RandomNearbyDestinationIterator(nearbyDistanceMatrix, nearbyRandom, workingRandom,
-                    replayingOriginValueIterator, this::toElementPosition, childSelector.getSize());
+                    replayingOriginValueIterator, this::toElementPosition, destinationSize);
         }
     }
 }
