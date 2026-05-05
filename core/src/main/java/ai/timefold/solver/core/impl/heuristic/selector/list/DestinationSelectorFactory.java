@@ -9,7 +9,6 @@ import ai.timefold.solver.core.config.heuristic.selector.common.SelectionOrder;
 import ai.timefold.solver.core.config.heuristic.selector.common.nearby.NearbySelectionConfig;
 import ai.timefold.solver.core.config.heuristic.selector.list.DestinationSelectorConfig;
 import ai.timefold.solver.core.config.heuristic.selector.value.ValueSelectorConfig;
-import ai.timefold.solver.core.enterprise.TimefoldSolverEnterpriseService;
 import ai.timefold.solver.core.impl.domain.entity.descriptor.EntityDescriptor;
 import ai.timefold.solver.core.impl.heuristic.HeuristicConfigPolicy;
 import ai.timefold.solver.core.impl.heuristic.selector.AbstractSelectorFactory;
@@ -133,9 +132,13 @@ public final class DestinationSelectorFactory<Solution_> extends AbstractSelecto
         if (nearbySelectionConfig == null) {
             return destinationSelector;
         }
-        // The nearby selector will implement its own logic to filter out unreachable elements.
-        // It requires the child selectors to not be FilteringEntityValueRangeSelector or FilteringValueRangeSelector,
-        // as it needs to iterate over all available values to construct the distance matrix.
+        nearbySelectionConfig.validateNearby(minimumCacheType, selectionOrder);
+        boolean randomSelection = selectionOrder.toRandomSelectionBoolean();
+        // When entity value range filtering is enabled, create a new destination selector WITHOUT it.
+        // The nearby distance matrix needs to iterate ALL values via endingIterator();
+        // value range filtering would interfere by requiring the mimic recording pattern to be active.
+        // Value range enforcement is handled by PossibleMoveFilter at the move level instead.
+        ElementDestinationSelector<Solution_> effectiveDestinationSelector;
         if (enableEntityValueRange) {
             var entitySelector =
                     EntitySelectorFactory.<Solution_> create(Objects.requireNonNull(config.getEntitySelectorConfig()))
@@ -145,15 +148,34 @@ public final class DestinationSelectorFactory<Solution_> extends AbstractSelecto
                     .buildValueSelector(configPolicy, entitySelector.getEntityDescriptor(), minimumCacheType,
                             selectionOrder, configPolicy.isReinitializeVariableFilterEnabled(),
                             ValueSelectorFactory.ListValueFilteringType.ACCEPT_ASSIGNED, null, false);
-            var updatedDestinationSelector =
+            effectiveDestinationSelector =
                     new ElementDestinationSelector<>(entitySelector, (IterableValueSelector<Solution_>) valueSelector,
-                            selectionOrder.toRandomSelectionBoolean());
-            return TimefoldSolverEnterpriseService.loadOrFail(TimefoldSolverEnterpriseService.Feature.NEARBY_SELECTION)
-                    .applyNearbySelection(config, configPolicy, minimumCacheType, selectionOrder,
-                            updatedDestinationSelector);
+                            randomSelection);
         } else {
-            return TimefoldSolverEnterpriseService.loadOrFail(TimefoldSolverEnterpriseService.Feature.NEARBY_SELECTION)
-                    .applyNearbySelection(config, configPolicy, minimumCacheType, selectionOrder, destinationSelector);
+            effectiveDestinationSelector = destinationSelector;
+        }
+        var nearbyDistanceMeter = configPolicy.getClassInstanceCache().newInstance(nearbySelectionConfig,
+                "nearbyDistanceMeterClass", nearbySelectionConfig.getNearbyDistanceMeterClass());
+        var nearbyRandom = ai.timefold.solver.core.impl.heuristic.selector.common.nearby.NearbyRandomFactory
+                .create(nearbySelectionConfig).buildNearbyRandom(randomSelection);
+        if (nearbySelectionConfig.getOriginValueSelectorConfig() != null) {
+            var originValueSelector = ValueSelectorFactory
+                    .<Solution_> create(nearbySelectionConfig.getOriginValueSelectorConfig())
+                    .buildValueSelector(configPolicy, effectiveDestinationSelector.getEntityDescriptor(), minimumCacheType,
+                            selectionOrder);
+            return new ai.timefold.solver.core.impl.heuristic.selector.list.nearby.NearValueNearbyDestinationSelector<>(
+                    effectiveDestinationSelector, (IterableValueSelector<Solution_>) originValueSelector,
+                    nearbyDistanceMeter, nearbyRandom, randomSelection);
+        } else if (nearbySelectionConfig.getOriginSubListSelectorConfig() != null) {
+            var subListSelector =
+                    SubListSelectorFactory.<Solution_> create(nearbySelectionConfig.getOriginSubListSelectorConfig())
+                            .buildSubListSelector(configPolicy, null, minimumCacheType, selectionOrder);
+            return new ai.timefold.solver.core.impl.heuristic.selector.list.nearby.NearSubListNearbyDestinationSelector<>(
+                    effectiveDestinationSelector, subListSelector, nearbyDistanceMeter, nearbyRandom, randomSelection);
+        } else {
+            throw new IllegalArgumentException("The destinationSelector (" + config
+                    + ")'s nearbySelectionConfig (" + nearbySelectionConfig
+                    + ") requires an originSubListSelector or an originValueSelector.");
         }
     }
 

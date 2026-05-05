@@ -14,7 +14,6 @@ import ai.timefold.solver.core.config.heuristic.selector.common.decorator.Select
 import ai.timefold.solver.core.config.heuristic.selector.common.nearby.NearbySelectionConfig;
 import ai.timefold.solver.core.config.heuristic.selector.entity.EntitySelectorConfig;
 import ai.timefold.solver.core.config.heuristic.selector.value.ValueSelectorConfig;
-import ai.timefold.solver.core.enterprise.TimefoldSolverEnterpriseService;
 import ai.timefold.solver.core.impl.domain.entity.descriptor.EntityDescriptor;
 import ai.timefold.solver.core.impl.heuristic.HeuristicConfigPolicy;
 import ai.timefold.solver.core.impl.heuristic.selector.AbstractSelectorFactory;
@@ -112,19 +111,11 @@ public class EntitySelectorFactory<Solution_> extends AbstractSelectorFactory<So
                 baseRandomSelection);
         var instanceCache = configPolicy.getClassInstanceCache();
         if (nearbySelectionConfig != null) {
-            // TODO Static filtering (such as movableEntitySelectionFilter) should affect nearbySelection
+            // Nearby selection replaces entity value range filtering.
+            // Value range enforcement is handled by PossibleMoveFilter at the move level instead.
             entitySelector = applyNearbySelection(configPolicy, nearbySelectionConfig, minimumCacheType,
                     resolvedSelectionOrder, entitySelector);
         } else {
-            // The nearby selector will implement its own logic to filter out unreachable elements.
-            // Therefore, we only apply entity value range filtering if the nearby feature is not enabled;
-            // otherwise, we would end up applying the filtering logic twice.
-            // The range-filtering node will use the ReachableValues structure
-            // to fetch and iterate only over the values that are reachable from the current selection.
-            // It is expected that the size of the reachable values will be smaller than that of the filtering node
-            // created by the applyFiltering function.
-            // Therefore, we first create the range-filtering node,
-            // and then we apply the usual filtering node decorator.
             entitySelector = applyEntityValueRangeFiltering(configPolicy, entitySelector, valueRangeRecorderId,
                     minimumCacheType, inheritedSelectionOrder, baseRandomSelection);
         }
@@ -284,9 +275,20 @@ public class EntitySelectorFactory<Solution_> extends AbstractSelectorFactory<So
     private EntitySelector<Solution_> applyNearbySelection(HeuristicConfigPolicy<Solution_> configPolicy,
             NearbySelectionConfig nearbySelectionConfig, SelectionCacheType minimumCacheType,
             SelectionOrder resolvedSelectionOrder, EntitySelector<Solution_> entitySelector) {
-        return TimefoldSolverEnterpriseService.loadOrFail(TimefoldSolverEnterpriseService.Feature.NEARBY_SELECTION)
-                .applyNearbySelection(config, configPolicy, nearbySelectionConfig, minimumCacheType,
-                        resolvedSelectionOrder, entitySelector);
+        boolean randomSelection = resolvedSelectionOrder.toRandomSelectionBoolean();
+        if (nearbySelectionConfig.getOriginEntitySelectorConfig() == null) {
+            throw new IllegalArgumentException("The entitySelector (" + config
+                    + ")'s nearbySelectionConfig (" + nearbySelectionConfig + ") requires an originEntitySelector.");
+        }
+        var originEntitySelector =
+                EntitySelectorFactory.<Solution_> create(nearbySelectionConfig.getOriginEntitySelectorConfig())
+                        .buildEntitySelector(configPolicy, minimumCacheType, resolvedSelectionOrder);
+        var nearbyDistanceMeter = configPolicy.getClassInstanceCache().newInstance(nearbySelectionConfig,
+                "nearbyDistanceMeterClass", nearbySelectionConfig.getNearbyDistanceMeterClass());
+        var nearbyRandom = ai.timefold.solver.core.impl.heuristic.selector.common.nearby.NearbyRandomFactory
+                .create(nearbySelectionConfig).buildNearbyRandom(randomSelection);
+        return new ai.timefold.solver.core.impl.heuristic.selector.entity.nearby.NearEntityNearbyEntitySelector<>(
+                entitySelector, originEntitySelector, nearbyDistanceMeter, nearbyRandom, randomSelection);
     }
 
     private EntitySelector<Solution_> applyFiltering(EntitySelector<Solution_> entitySelector,
