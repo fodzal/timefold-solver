@@ -181,6 +181,14 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 }
                 yield buildSingleDirectionalParentGraph(graphDescriptor, graphStructureAndDirection);
             }
+            case MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT -> {
+                var scoreDirector =
+                        graphDescriptor.variableReferenceGraphBuilder().changedVariableNotifier.innerScoreDirector();
+                if (scoreDirector == null) {
+                    yield buildArbitraryGraph(graphDescriptor);
+                }
+                yield buildMultiEntityChainedGraph(graphDescriptor, graphStructureAndDirection);
+            }
             case ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE ->
                 buildArbitrarySingleEntityGraph(graphDescriptor);
             case NO_DYNAMIC_EDGES, ARBITRARY ->
@@ -205,6 +213,161 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 topologicalSorter, graphDescriptor.changedVariableNotifier(),
                 canTerminateEarly,
                 graphDescriptor.entities());
+    }
+
+    @SuppressWarnings({ "unchecked", "rawtypes" })
+    static <Solution_> VariableReferenceGraph buildMultiEntityChainedGraph(
+            GraphDescriptor<Solution_> graphDescriptor,
+            GraphStructure.GraphStructureAndDirection graphStructureAndDirection) {
+        var allDescriptors = graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors();
+        var sortedDescriptors = topologicallySortedDeclarativeShadowVariables(allDescriptors);
+
+        // Identify the chained entity class (the one with PREVIOUS/NEXT sources)
+        Class<?> chainedEntityClass = null;
+        for (var descriptor : sortedDescriptors) {
+            for (var source : descriptor.getSources()) {
+                var parentType = source.parentVariableType();
+                if (parentType == ParentVariableType.PREVIOUS || parentType == ParentVariableType.NEXT) {
+                    chainedEntityClass = descriptor.getEntityDescriptor().getEntityClass();
+                    break;
+                }
+            }
+            if (chainedEntityClass != null) {
+                break;
+            }
+        }
+        Objects.requireNonNull(chainedEntityClass, "No chained entity class found");
+
+        // Split descriptors by entity class
+        var chainedDescriptors = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
+        var fixedDescriptors = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
+        for (var descriptor : sortedDescriptors) {
+            if (chainedEntityClass.isAssignableFrom(descriptor.getEntityDescriptor().getEntityClass())) {
+                chainedDescriptors.add(descriptor);
+            } else {
+                fixedDescriptors.add(descriptor);
+            }
+        }
+
+        if (fixedDescriptors.isEmpty()) {
+            // Fallback: no fixed entity descriptors, use single directional parent
+            return buildSingleDirectionalParentGraph(graphDescriptor, graphStructureAndDirection);
+        }
+
+        var canTerminateEarly = hasNoNonDeclarativeSourcesFromParent(allDescriptors);
+
+        // Build the TopologicalSorter for the chained entity (same as SingleDirectionalParent)
+        var topologicalSorter = getTopologicalSorter(graphDescriptor.solutionDescriptor(),
+                Objects.requireNonNull(graphDescriptor.changedVariableNotifier().innerScoreDirector()),
+                Objects.requireNonNull(graphStructureAndDirection.direction()));
+
+        // Build the fixed entity (Vehicle) DAG from GROUP sources
+        var fixedEntityClass = fixedDescriptors.get(0).getEntityDescriptor().getEntityClass();
+        var entities = graphDescriptor.entities();
+        var listDescriptor = graphDescriptor.solutionDescriptor().getListVariableDescriptor();
+
+        // vehicleFirstVisit: Vehicle -> first Visit (or null if empty)
+        Function<Object, Object> vehicleFirstVisit = vehicle -> {
+            var list = listDescriptor.getValue(vehicle);
+            return list.isEmpty() ? null : list.get(0);
+        };
+
+        // Find the InverseRelation field accessor on the chained entity (e.g., Visit.vehicle).
+        // This reads the entity's field directly, bypassing the list state supply.
+        // Needed in beforeVariableChanged: at that point the supply's position map may already
+        // be cleared (element unassigned), but the entity field still holds the old value.
+        var chainedEntityDescriptor = chainedDescriptors.get(0).getEntityDescriptor();
+        Function<Object, Object> directChainedToFixed = null;
+        for (var shadowVar : chainedEntityDescriptor.getDeclaredShadowVariableDescriptors()) {
+            if (shadowVar instanceof ai.timefold.solver.core.impl.domain.variable.inverserelation.InverseRelationShadowVariableDescriptor<?> inverseDesc) {
+                directChainedToFixed = inverseDesc::getValue;
+                break;
+            }
+        }
+        Objects.requireNonNull(directChainedToFixed,
+                "No InverseRelationShadowVariable found on chained entity " + chainedEntityClass.getSimpleName());
+        var finalDirectChainedToFixed = directChainedToFixed;
+
+        // Build predecessor -> successor mapping from GROUP sources
+        var predecessorToSuccessors = new IdentityHashMap<Object, List<Object>>();
+        var allFixedEntities = new ArrayList<>();
+        var inDegree = new IdentityHashMap<Object, int[]>();
+
+        for (var entity : entities) {
+            if (fixedEntityClass.isInstance(entity)) {
+                allFixedEntities.add(entity);
+                inDegree.put(entity, new int[] { 0 });
+            }
+        }
+
+        // Discover predecessor relationships from GROUP sources on fixed entity descriptors
+        for (var descriptor : fixedDescriptors) {
+            for (var source : descriptor.getSources()) {
+                if (source.parentVariableType() == ParentVariableType.GROUP) {
+                    for (var entity : entities) {
+                        if (fixedEntityClass.isInstance(entity)) {
+                            source.valueEntityFunction().accept(entity, predecessor -> {
+                                if (fixedEntityClass.isInstance(predecessor)) {
+                                    predecessorToSuccessors
+                                            .computeIfAbsent(predecessor, k -> new ArrayList<>())
+                                            .add(entity);
+                                    var deg = inDegree.get(entity);
+                                    if (deg != null) {
+                                        deg[0]++;
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Topological sort of fixed entities (Kahn's algorithm)
+        var fixedEntityToOrder = new IdentityHashMap<Object, Integer>();
+        var topoQueue = new java.util.ArrayDeque<Object>();
+        for (var entity : allFixedEntities) {
+            if (inDegree.get(entity)[0] == 0) {
+                topoQueue.add(entity);
+            }
+        }
+        int order = 0;
+        while (!topoQueue.isEmpty()) {
+            var entity = topoQueue.poll();
+            fixedEntityToOrder.put(entity, order++);
+            var successors = predecessorToSuccessors.get(entity);
+            if (successors != null) {
+                for (var successor : successors) {
+                    var deg = inDegree.get(successor);
+                    if (deg != null && --deg[0] == 0) {
+                        topoQueue.add(successor);
+                    }
+                }
+            }
+        }
+        // Any remaining fixed entities (disconnected from DAG) get the next order values
+        for (var entity : allFixedEntities) {
+            fixedEntityToOrder.putIfAbsent(entity, order++);
+        }
+
+        // Convert predecessorToSuccessors to array-based map for performance
+        var fixedEntityToSuccessors = new IdentityHashMap<Object, Object[]>();
+        for (var entry : predecessorToSuccessors.entrySet()) {
+            fixedEntityToSuccessors.put(entry.getKey(), entry.getValue().toArray());
+        }
+
+        return new MultiEntityChainedVariableReferenceGraph<>(
+                graphDescriptor.consistencyTracker(),
+                chainedDescriptors,
+                fixedDescriptors,
+                topologicalSorter,
+                graphDescriptor.changedVariableNotifier(),
+                canTerminateEarly,
+                vehicleFirstVisit,
+                finalDirectChainedToFixed,
+                fixedEntityToOrder,
+                fixedEntityToSuccessors,
+                entities);
     }
 
     private static <Solution_> boolean hasNoNonDeclarativeSourcesFromParent(
