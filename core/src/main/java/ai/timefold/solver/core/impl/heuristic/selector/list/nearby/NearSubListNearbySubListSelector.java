@@ -4,7 +4,7 @@ import java.util.Iterator;
 
 import ai.timefold.solver.core.impl.domain.variable.ListVariableStateSupply;
 import ai.timefold.solver.core.impl.domain.variable.descriptor.ListVariableDescriptor;
-import ai.timefold.solver.core.impl.heuristic.selector.common.iterator.SelectionIterator;
+import ai.timefold.solver.core.impl.heuristic.selector.common.iterator.UpcomingSelectionIterator;
 import ai.timefold.solver.core.impl.heuristic.selector.common.nearby.AbstractNearbyDistanceMatrixDemand;
 import ai.timefold.solver.core.impl.heuristic.selector.common.nearby.AbstractNearbySelector;
 import ai.timefold.solver.core.impl.heuristic.selector.common.nearby.NearbyDistanceMeter;
@@ -14,6 +14,7 @@ import ai.timefold.solver.core.impl.heuristic.selector.list.SubList;
 import ai.timefold.solver.core.impl.heuristic.selector.list.SubListSelector;
 import ai.timefold.solver.core.impl.heuristic.selector.list.mimic.MimicReplayingSubListSelector;
 import ai.timefold.solver.core.impl.solver.scope.SolverScope;
+import ai.timefold.solver.core.preview.api.domain.metamodel.PositionInList;
 
 public final class NearSubListNearbySubListSelector<Solution_>
         extends AbstractNearbySelector<Solution_, RandomSubListSelector<Solution_>, MimicReplayingSubListSelector<Solution_>>
@@ -87,7 +88,7 @@ public final class NearSubListNearbySubListSelector<Solution_>
         return new RandomSubListNearbySubListIterator(replayingOriginSubListIterator, childSelector.getValueCount());
     }
 
-    private final class RandomSubListNearbySubListIterator extends SelectionIterator<SubList> {
+    private final class RandomSubListNearbySubListIterator extends UpcomingSelectionIterator<SubList> {
         private final Iterator<SubList> replayingOriginSubListIterator;
         private final int nearbySize;
 
@@ -100,12 +101,10 @@ public final class NearSubListNearbySubListSelector<Solution_>
         }
 
         @Override
-        public boolean hasNext() {
-            return replayingOriginSubListIterator.hasNext() && nearbySize > 0 && childSelector.getSize() > 0;
-        }
-
-        @Override
-        public SubList next() {
+        protected SubList createUpcomingSelection() {
+            if (!replayingOriginSubListIterator.hasNext() || nearbySize == 0 || childSelector.getSize() == 0) {
+                return noUpcomingSelection();
+            }
             SubList subList = replayingOriginSubListIterator.next();
             Object origin = replayingSelector.getVariableDescriptor().getElement(subList.entity(), subList.fromIndex());
 
@@ -113,11 +112,22 @@ public final class NearSubListNearbySubListSelector<Solution_>
             int nearbyElementListIndex = -1;
             int availableListSize = -1;
 
+            // Bound retries to avoid a potential infinite loop when allowsUnassignedValues=true and the
+            // truncated nearby matrix happens to contain only unassigned elements for this origin.
+            int unassignedSkipBudget = nearbySize;
             while (availableListSize < childSelector.getMinimumSubListSize()) {
                 int nearbyIndex = nearbyRandom.nextInt(workingRandom, nearbySize);
                 Object nearbyElement = nearbyDistanceMatrix.getDestination(origin, nearbyIndex);
-                nearbyElementEntity = listVariableStateSupply.getInverseSingleton(nearbyElement);
-                nearbyElementListIndex = listVariableStateSupply.getIndex(nearbyElement);
+                // Skip unassigned elements: getIndex would return null and unbox to NPE.
+                if (!(listVariableStateSupply.getElementPosition(nearbyElement) instanceof PositionInList position)) {
+                    if (--unassignedSkipBudget < 0) {
+                        // The nearby matrix only contains unassigned elements for this origin: abort the move.
+                        return noUpcomingSelection();
+                    }
+                    continue;
+                }
+                nearbyElementEntity = position.entity();
+                nearbyElementListIndex = position.index();
                 availableListSize =
                         childSelector.getVariableDescriptor().getListSize(nearbyElementEntity) - nearbyElementListIndex;
             }
