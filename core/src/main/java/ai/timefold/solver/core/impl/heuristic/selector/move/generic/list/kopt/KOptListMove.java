@@ -3,7 +3,9 @@ package ai.timefold.solver.core.impl.heuristic.selector.move.generic.list.kopt;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import ai.timefold.solver.core.api.domain.solution.PlanningSolution;
 import ai.timefold.solver.core.api.score.director.ScoreDirector;
@@ -169,6 +171,37 @@ public final class KOptListMove<Solution_> extends AbstractMove<Solution_> {
             out.addAll(combinedList.subList(affectedRange.startInclusive(), affectedRange.endExclusive()));
         }
 
+        return out;
+    }
+
+    /**
+     * Simulates this move without applying it, returning the new value of the list variable
+     * for each affected entity (full list, including any pinned prefix), keyed by the entity itself.
+     * <p>
+     * Each returned list is an independent immutable copy; mutating it has no effect on the
+     * working solution. The pinned prefix is copied as-is from the current state (a K-opt move
+     * never touches pinned values, by construction).
+     *
+     * @return a map from each affected entity to its new full list,
+     *         in the same iteration order as {@link #getPlanningEntities()}.
+     */
+    public Map<Object, List<Object>> previewNewLists() {
+        var combinedListCopy = computeCombinedList(listVariableDescriptor, originalEntities).copy();
+        flipSublists(equivalent2Opts, combinedListCopy, postShiftAmount);
+        Map<Object, List<Object>> out = new LinkedHashMap<>(originalEntities.length);
+        for (var i = 0; i < originalEntities.length; i++) {
+            var entity = originalEntities[i];
+            var firstUnpinned = listVariableDescriptor.getFirstUnpinnedIndex(entity);
+            var currentFullList = listVariableDescriptor.getValue(entity);
+            @SuppressWarnings("unchecked")
+            var newUnpinnedTail = (List<Object>) combinedListCopy.delegates[i];
+            var newFullList = new ArrayList<Object>(firstUnpinned + newUnpinnedTail.size());
+            if (firstUnpinned > 0) {
+                newFullList.addAll(currentFullList.subList(0, firstUnpinned));
+            }
+            newFullList.addAll(newUnpinnedTail);
+            out.put(entity, List.copyOf(newFullList));
+        }
         return out;
     }
 
