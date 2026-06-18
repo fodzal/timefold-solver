@@ -55,6 +55,13 @@ public final class NearbyDistanceMatrix<Origin, Destination> implements Supply {
                 highestDistance = distances[size - 1];
             }
         }
+        // The allocated destinationSize is an upper bound (the child selector's reported size); the iterator may
+        // yield fewer destinations (e.g. a list variable that allows unassigned values reports the unassigned
+        // values in its size, but filters them out of the iterator). Trim the trailing unused slots so that
+        // getDestination never returns a null and getDestinationSize reflects the real number of destinations.
+        if (size < destinations.length) {
+            destinations = Arrays.copyOf(destinations, size);
+        }
         originToDestinationsMap.put(origin, destinations);
     }
 

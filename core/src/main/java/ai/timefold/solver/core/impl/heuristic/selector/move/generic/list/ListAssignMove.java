@@ -7,6 +7,7 @@ import java.util.Objects;
 import ai.timefold.solver.core.api.score.director.ScoreDirector;
 import ai.timefold.solver.core.impl.domain.variable.descriptor.ListVariableDescriptor;
 import ai.timefold.solver.core.impl.heuristic.move.AbstractMove;
+import ai.timefold.solver.core.impl.score.director.ValueRangeManager;
 import ai.timefold.solver.core.impl.score.director.VariableDescriptorAwareScoreDirector;
 
 public final class ListAssignMove<Solution_> extends AbstractMove<Solution_> {
@@ -48,7 +49,16 @@ public final class ListAssignMove<Solution_> extends AbstractMove<Solution_> {
 
     @Override
     public boolean isMoveDoable(ScoreDirector<Solution_> scoreDirector) {
-        return destinationIndex >= 0 && variableDescriptor.getListSize(destinationEntity) >= destinationIndex;
+        var doable = destinationIndex >= 0 && variableDescriptor.getListSize(destinationEntity) >= destinationIndex;
+        if (!doable || variableDescriptor.canExtractValueRangeFromSolution()) {
+            return doable;
+        }
+        // When the value range is located on the entity, the assigned value must be in the destination's value range.
+        ValueRangeManager<Solution_> valueRangeManager =
+                ((VariableDescriptorAwareScoreDirector<Solution_>) scoreDirector).getValueRangeManager();
+        var destinationValueRange =
+                valueRangeManager.getFromEntity(variableDescriptor.getValueRangeDescriptor(), destinationEntity);
+        return destinationValueRange.contains(planningValue);
     }
 
     @Override

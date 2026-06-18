@@ -11,6 +11,7 @@ import ai.timefold.solver.core.api.domain.variable.PlanningListVariable;
 import ai.timefold.solver.core.api.score.director.ScoreDirector;
 import ai.timefold.solver.core.impl.domain.variable.descriptor.ListVariableDescriptor;
 import ai.timefold.solver.core.impl.heuristic.move.AbstractMove;
+import ai.timefold.solver.core.impl.score.director.ValueRangeManager;
 import ai.timefold.solver.core.impl.score.director.VariableDescriptorAwareScoreDirector;
 
 /**
@@ -115,7 +116,19 @@ public class ListSwapMove<Solution_> extends AbstractMove<Solution_> {
         // Do not use Object#equals on user-provided domain objects. Relying on user's implementation of Object#equals
         // opens the opportunity to shoot themselves in the foot if different entities can be equal.
         var sameEntity = leftEntity == rightEntity;
-        return !(sameEntity && leftIndex == rightIndex);
+        var doable = !(sameEntity && leftIndex == rightIndex);
+        if (!doable || sameEntity || variableDescriptor.canExtractValueRangeFromSolution()) {
+            return doable;
+        }
+        // When the value range is located on the entity, both swapped values must fit the other entity's value range:
+        // after the swap, the right value is assigned to the left entity and vice versa.
+        ValueRangeManager<Solution_> valueRangeManager =
+                ((VariableDescriptorAwareScoreDirector<Solution_>) scoreDirector).getValueRangeManager();
+        var leftValue = variableDescriptor.getElement(leftEntity, leftIndex);
+        var rightValue = variableDescriptor.getElement(rightEntity, rightIndex);
+        var leftValueRange = valueRangeManager.getFromEntity(variableDescriptor.getValueRangeDescriptor(), leftEntity);
+        var rightValueRange = valueRangeManager.getFromEntity(variableDescriptor.getValueRangeDescriptor(), rightEntity);
+        return leftValueRange.contains(rightValue) && rightValueRange.contains(leftValue);
     }
 
     @Override

@@ -11,6 +11,7 @@ import ai.timefold.solver.core.api.domain.variable.PlanningListVariable;
 import ai.timefold.solver.core.api.score.director.ScoreDirector;
 import ai.timefold.solver.core.impl.domain.variable.descriptor.ListVariableDescriptor;
 import ai.timefold.solver.core.impl.heuristic.move.AbstractMove;
+import ai.timefold.solver.core.impl.score.director.ValueRangeManager;
 import ai.timefold.solver.core.impl.score.director.VariableDescriptorAwareScoreDirector;
 
 /**
@@ -126,12 +127,21 @@ public class ListChangeMove<Solution_> extends AbstractMove<Solution_> {
 
     @Override
     public boolean isMoveDoable(ScoreDirector<Solution_> scoreDirector) {
-        // TODO maybe remove this because no such move should be generated
         // Do not use Object#equals on user-provided domain objects. Relying on user's implementation of Object#equals
         // opens the opportunity to shoot themselves in the foot if different entities can be equal.
         var sameEntity = destinationEntity == sourceEntity;
-        return !sameEntity
+        var doable = !sameEntity
                 || (destinationIndex != sourceIndex && destinationIndex != variableDescriptor.getListSize(sourceEntity));
+        if (!doable || sameEntity || variableDescriptor.canExtractValueRangeFromSolution()) {
+            return doable;
+        }
+        // When the value range is located on the entity, the moved value must be in the destination entity's value range.
+        ValueRangeManager<Solution_> valueRangeManager =
+                ((VariableDescriptorAwareScoreDirector<Solution_>) scoreDirector).getValueRangeManager();
+        var destinationValueRange =
+                valueRangeManager.getFromEntity(variableDescriptor.getValueRangeDescriptor(), destinationEntity);
+        var movedValue = variableDescriptor.getElement(sourceEntity, sourceIndex);
+        return destinationValueRange.contains(movedValue);
     }
 
     @Override

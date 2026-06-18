@@ -26,7 +26,6 @@ import ai.timefold.solver.core.testdomain.list.valuerange.TestdataListEntityProv
 import ai.timefold.solver.core.testdomain.list.valuerange.TestdataListEntityProvidingValue;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -47,11 +46,12 @@ class ListChangeMoveTest {
             mock(InnerScoreDirector.class);
     private final ListVariableDescriptor<TestdataListEntityProvidingSolution> otherVariableDescriptor =
             TestdataListEntityProvidingEntity.buildVariableDescriptorForValueList();
+    private final ValueRangeManager<TestdataListEntityProvidingSolution> valueRangeManager =
+            new ValueRangeManager<>(TestdataListEntityProvidingSolution.buildSolutionDescriptor());
 
     @BeforeEach
     void setUp() {
-        when(otherInnerScoreDirector.getValueRangeManager())
-                .thenReturn(new ValueRangeManager<>(otherVariableDescriptor.getEntityDescriptor().getSolutionDescriptor()));
+        when(otherInnerScoreDirector.getValueRangeManager()).thenReturn(valueRangeManager);
     }
 
     @Test
@@ -69,7 +69,6 @@ class ListChangeMoveTest {
         assertThat(new ListChangeMove<>(variableDescriptor, e1, 0, e2, 0).isMoveDoable(scoreDirector)).isTrue();
     }
 
-    @Disabled("Temporarily disabled")
     @Test
     void isMoveDoableValueRangeProviderOnEntity() {
         var value1 = new TestdataListEntityProvidingValue("1");
@@ -77,11 +76,14 @@ class ListChangeMoveTest {
         var value3 = new TestdataListEntityProvidingValue("3");
         var entity1 = new TestdataListEntityProvidingEntity("e1", List.of(value1, value2), List.of(value1, value2));
         var entity2 = new TestdataListEntityProvidingEntity("e2", List.of(value1, value3), List.of(value3));
-        // different entity => valid value
+        var solution = new TestdataListEntityProvidingSolution();
+        solution.setEntityList(List.of(entity1, entity2));
+        valueRangeManager.reset(solution);
+        // different entity => valid value (value1 is in e2's value range)
         assertThat(new ListChangeMove<>(otherVariableDescriptor, entity1, 0, entity2, 0)
                 .isMoveDoable(otherInnerScoreDirector))
                 .isTrue();
-        // different entity => invalid value
+        // different entity => invalid value (value2 is not in e2's value range)
         assertThat(new ListChangeMove<>(otherVariableDescriptor, entity1, 1, entity2, 0)
                 .isMoveDoable(otherInnerScoreDirector))
                 .isFalse();

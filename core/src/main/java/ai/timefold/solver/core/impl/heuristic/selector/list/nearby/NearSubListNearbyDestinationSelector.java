@@ -1,6 +1,7 @@
 package ai.timefold.solver.core.impl.heuristic.selector.list.nearby;
 
 import java.util.Iterator;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
 
 import ai.timefold.solver.core.impl.heuristic.selector.common.nearby.AbstractNearbyDistanceMatrixDemand;
@@ -11,6 +12,7 @@ import ai.timefold.solver.core.impl.heuristic.selector.list.SubList;
 import ai.timefold.solver.core.impl.heuristic.selector.list.SubListSelector;
 import ai.timefold.solver.core.impl.heuristic.selector.list.mimic.MimicReplayingSubListSelector;
 import ai.timefold.solver.core.preview.api.domain.metamodel.ElementPosition;
+import ai.timefold.solver.core.preview.api.domain.metamodel.PositionInList;
 
 public final class NearSubListNearbyDestinationSelector<Solution_>
         extends AbstractNearbyDestinationSelector<Solution_, MimicReplayingSubListSelector<Solution_>> {
@@ -39,17 +41,36 @@ public final class NearSubListNearbyDestinationSelector<Solution_>
     @Override
     public Iterator<ElementPosition> iterator() {
         Iterator<SubList> replayingOriginSubListIterator = replayingSelector.iterator();
-        Function<Iterator<?>, Object> originFunction = i -> {
-            SubList subList = (SubList) i.next();
-            return firstElement(subList);
-        };
+        // The raw origin is the whole sub list; the nearby distance matrix is keyed by its first element.
+        Function<Iterator<?>, Object> originFunction = Iterator::next;
+        Function<Object, Object> originToMatrixKey = o -> firstElement((SubList) o);
         long destinationSize = computeDestinationSize();
+        var reachableValues = reachableValuesOrNull();
+        var listVariableDescriptor = replayingSelector.getVariableDescriptor();
+        // The whole sub list moves to the destination entity; keep only destinations whose entity accepts every value.
+        BiPredicate<Object, ElementPosition> destinationAcceptor = reachableValues == null ? null
+                : (rawOrigin, destination) -> {
+                    if (!(destination instanceof PositionInList positionInList)) {
+                        return true;
+                    }
+                    var entity = positionInList.entity();
+                    SubList subList = (SubList) rawOrigin;
+                    var to = subList.fromIndex() + subList.length();
+                    for (var i = subList.fromIndex(); i < to; i++) {
+                        var value = listVariableDescriptor.getElement(subList.entity(), i);
+                        if (!reachableValues.isEntityReachable(value, entity)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                };
         if (!randomSelection) {
             return new OriginalNearbyDestinationIterator(nearbyDistanceMatrix, replayingOriginSubListIterator, originFunction,
-                    this::toElementPosition, destinationSize);
+                    originToMatrixKey, this::toElementPosition, destinationSize, destinationAcceptor);
         } else {
             return new RandomNearbyDestinationIterator(nearbyDistanceMatrix, nearbyRandom, workingRandom,
-                    replayingOriginSubListIterator, originFunction, this::toElementPosition, destinationSize);
+                    replayingOriginSubListIterator, originFunction, originToMatrixKey, this::toElementPosition,
+                    destinationSize, destinationAcceptor);
         }
     }
 
