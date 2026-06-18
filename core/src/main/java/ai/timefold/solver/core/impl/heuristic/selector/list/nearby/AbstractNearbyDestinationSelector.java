@@ -2,12 +2,14 @@ package ai.timefold.solver.core.impl.heuristic.selector.list.nearby;
 
 import ai.timefold.solver.core.impl.domain.variable.ListVariableStateSupply;
 import ai.timefold.solver.core.impl.domain.variable.descriptor.ListVariableDescriptor;
+import ai.timefold.solver.core.impl.heuristic.selector.common.ReachableValues;
 import ai.timefold.solver.core.impl.heuristic.selector.common.nearby.AbstractNearbySelector;
 import ai.timefold.solver.core.impl.heuristic.selector.common.nearby.NearbyDistanceMeter;
 import ai.timefold.solver.core.impl.heuristic.selector.common.nearby.NearbyRandom;
 import ai.timefold.solver.core.impl.heuristic.selector.list.DestinationSelector;
 import ai.timefold.solver.core.impl.heuristic.selector.list.ElementDestinationSelector;
 import ai.timefold.solver.core.impl.phase.event.PhaseLifecycleListener;
+import ai.timefold.solver.core.impl.score.director.ValueRangeManager;
 import ai.timefold.solver.core.impl.solver.scope.SolverScope;
 import ai.timefold.solver.core.preview.api.domain.metamodel.ElementPosition;
 import ai.timefold.solver.core.preview.api.domain.metamodel.PositionInList;
@@ -17,6 +19,8 @@ abstract class AbstractNearbyDestinationSelector<Solution_, ReplayingSelector_ e
         implements DestinationSelector<Solution_> {
 
     protected ListVariableStateSupply<Solution_, Object, Object> listVariableStateSupply;
+    private ValueRangeManager<Solution_> valueRangeManager;
+    private boolean valueRangeOnEntity;
 
     public AbstractNearbyDestinationSelector(ElementDestinationSelector<Solution_> childDestinationSelector,
             Object originSelector, NearbyDistanceMeter<?, ?> nearbyDistanceMeter, NearbyRandom nearbyRandom,
@@ -31,6 +35,22 @@ abstract class AbstractNearbyDestinationSelector<Solution_, ReplayingSelector_ e
         var supplyManager = solverScope.getScoreDirector().getSupplyManager();
         ListVariableDescriptor<Solution_> listVariableDescriptor = childSelector.getVariableDescriptor();
         listVariableStateSupply = supplyManager.demand(listVariableDescriptor.getStateDemand());
+        valueRangeManager = solverScope.getScoreDirector().getValueRangeManager();
+        // Per-entity reachability filtering is only meaningful when the value range is provided per entity
+        // (e.g. Vehicle.applicableVisits); a solution-level value range accepts every value on every entity.
+        valueRangeOnEntity = !listVariableDescriptor.getValueRangeDescriptor().canExtractValueRangeFromSolution();
+    }
+
+    /**
+     * @return a reachability index (origin value → which entities can host it) when the list variable has an
+     *         entity-provided value range, otherwise {@code null} (no destination compatibility filtering needed).
+     *         Cached by the {@link ValueRangeManager}, so cheap to call per iterator.
+     */
+    protected ReachableValues<Object, Object> reachableValuesOrNull() {
+        if (!valueRangeOnEntity) {
+            return null;
+        }
+        return valueRangeManager.getReachableValues(childSelector.getVariableDescriptor());
     }
 
     protected int computeDestinationSize() {
@@ -53,6 +73,7 @@ abstract class AbstractNearbyDestinationSelector<Solution_, ReplayingSelector_ e
     public void solvingEnded(SolverScope<Solution_> solverScope) {
         super.solvingEnded(solverScope);
         listVariableStateSupply = null;
+        valueRangeManager = null;
     }
 
     @Override

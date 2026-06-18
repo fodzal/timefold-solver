@@ -42,6 +42,14 @@ public class ElementDestinationSelector<Solution_> extends AbstractSelector<Solu
     private final EntitySelector<Solution_> entitySelector;
     private final IterableValueSelector<Solution_> replayingValueSelector;
     private final IterableValueSelector<Solution_> valueSelector;
+    /**
+     * Same as {@link #valueSelector} but WITHOUT the unassigned-value filter (it keeps the pin filter only). Used by
+     * {@link #endingIterator()} to feed the nearby distance matrix with every value as a candidate destination, not
+     * just the ones currently assigned. This way a value that becomes assigned later in the phase can still serve as
+     * a nearby insertion anchor; its position is resolved live at move time via {@code listVariableStateSupply}, so a
+     * value that is still unassigned simply yields an unassigned destination.
+     */
+    private final IterableValueSelector<Solution_> endingValueSelector;
     private final boolean randomSelection;
     private final boolean isExhaustiveSearch;
 
@@ -60,6 +68,10 @@ public class ElementDestinationSelector<Solution_> extends AbstractSelector<Solu
         var selector = filterPinnedListPlanningVariableValuesWithIndex(valueSelector, this::getListVariableStateSupply);
         this.replayingValueSelector = replayingValueSelector;
         this.valueSelector = listVariableDescriptor.allowsUnassignedValues() ? filterUnassignedValues(selector) : selector;
+        // The nearby distance matrix is built over endingValueSelector (all values, only pin-filtered) so that every
+        // visit is a candidate destination, including ones assigned later during the phase. selector is already in
+        // the valueSelector lifecycle chain (valueSelector wraps it), so no extra listener registration is needed.
+        this.endingValueSelector = selector;
         this.randomSelection = randomSelection;
         this.isExhaustiveSearch = isExhaustiveSearch;
         phaseLifecycleSupport.addEventListener(this.entitySelector);
@@ -183,7 +195,8 @@ public class ElementDestinationSelector<Solution_> extends AbstractSelector<Solu
         return Stream.concat(
                 StreamSupport.stream(Spliterators.spliterator(entitySelector.endingIterator(), entitySelector.getSize(), 0),
                         false),
-                StreamSupport.stream(Spliterators.spliterator(valueSelector.endingIterator(null), valueSelector.getSize(), 0),
+                StreamSupport.stream(
+                        Spliterators.spliterator(endingValueSelector.endingIterator(null), endingValueSelector.getSize(), 0),
                         false))
                 .iterator();
     }

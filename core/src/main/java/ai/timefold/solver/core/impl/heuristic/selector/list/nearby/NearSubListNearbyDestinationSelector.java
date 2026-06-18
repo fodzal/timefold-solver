@@ -48,8 +48,9 @@ public final class NearSubListNearbyDestinationSelector<Solution_>
             return new OriginalNearbyDestinationIterator(nearbyDistanceMatrix, replayingOriginSubListIterator, originFunction,
                     this::toElementPosition, destinationSize);
         } else {
+            // SubList destinations keep compatibility enforced downstream (PossibleMoveFilter); no upstream acceptor.
             return new RandomNearbyDestinationIterator(nearbyDistanceMatrix, nearbyRandom, workingRandom,
-                    replayingOriginSubListIterator, originFunction, this::toElementPosition, destinationSize);
+                    replayingOriginSubListIterator, originFunction, this::toElementPosition, destinationSize, null);
         }
     }
 
