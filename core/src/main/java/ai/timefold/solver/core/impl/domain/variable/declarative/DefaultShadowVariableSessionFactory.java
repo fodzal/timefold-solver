@@ -1,5 +1,6 @@
 package ai.timefold.solver.core.impl.domain.variable.declarative;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
@@ -181,6 +182,14 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 }
                 yield buildSingleDirectionalParentGraph(graphDescriptor, graphStructureAndDirection);
             }
+            case MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT -> {
+                var scoreDirector =
+                        graphDescriptor.variableReferenceGraphBuilder().changedVariableNotifier.innerScoreDirector();
+                if (scoreDirector == null) {
+                    yield buildArbitraryGraph(graphDescriptor);
+                }
+                yield buildMultiEntitySingleDirectionalParentGraph(graphDescriptor, graphStructureAndDirection);
+            }
             case ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE ->
                 buildArbitrarySingleEntityGraph(graphDescriptor);
             case NO_DYNAMIC_EDGES, ARBITRARY ->
@@ -205,6 +214,124 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 topologicalSorter, graphDescriptor.changedVariableNotifier(),
                 canTerminateEarly,
                 graphDescriptor.entities());
+    }
+
+    static <Solution_> VariableReferenceGraph buildMultiEntitySingleDirectionalParentGraph(
+            GraphDescriptor<Solution_> graphDescriptor,
+            GraphStructure.GraphStructureAndDirection graphStructureAndDirection) {
+        var declarativeShadowVariables = graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors();
+        var sortedDeclarativeVariables = topologicallySortedDeclarativeShadowVariables(declarativeShadowVariables);
+        var chainedEntityClass = Objects.requireNonNull(graphStructureAndDirection.parentMetaModel())
+                .entity().type();
+
+        var chainedDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
+        var preChainFixedDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
+        var postChainFixedDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
+        var postChainVariableSet = GraphStructure.computePostChainVariables(declarativeShadowVariables, chainedEntityClass);
+        for (var descriptor : sortedDeclarativeVariables) {
+            if (chainedEntityClass.isAssignableFrom(descriptor.getEntityDescriptor().getEntityClass())) {
+                chainedDescriptorList.add(descriptor);
+            } else if (postChainVariableSet.contains(descriptor.getVariableMetaModel())) {
+                postChainFixedDescriptorList.add(descriptor);
+            } else {
+                preChainFixedDescriptorList.add(descriptor);
+            }
+        }
+        if (preChainFixedDescriptorList.isEmpty() && postChainFixedDescriptorList.isEmpty()) {
+            return buildSingleDirectionalParentGraph(graphDescriptor, graphStructureAndDirection);
+        }
+
+        var fixedEntityClass = (preChainFixedDescriptorList.isEmpty() ? postChainFixedDescriptorList
+                : preChainFixedDescriptorList).get(0).getEntityDescriptor().getEntityClass();
+        var entities = graphDescriptor.entities();
+
+        // Build the fixed entities' DAG from their group sources.
+        var fixedEntityToInDegree = new IdentityHashMap<Object, MutableInt>();
+        for (var entity : entities) {
+            if (fixedEntityClass.isInstance(entity)) {
+                fixedEntityToInDegree.put(entity, new MutableInt());
+            }
+        }
+        var fixedEntityToSuccessorList = new IdentityHashMap<Object, List<Object>>();
+        for (var descriptorList : List.of(preChainFixedDescriptorList, postChainFixedDescriptorList)) {
+            for (var descriptor : descriptorList) {
+                for (var source : descriptor.getSources()) {
+                    if (source.parentVariableType() != ParentVariableType.GROUP) {
+                        continue;
+                    }
+                    for (var entity : fixedEntityToInDegree.keySet()) {
+                        source.valueEntityFunction().accept(entity, predecessor -> {
+                            if (fixedEntityClass.isInstance(predecessor) && predecessor != entity) {
+                                fixedEntityToSuccessorList.computeIfAbsent(predecessor, k -> new ArrayList<>())
+                                        .add(entity);
+                                fixedEntityToInDegree.get(entity).increment();
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+        // Kahn's algorithm; a leftover entity means the fact DAG has a cycle,
+        // which this graph cannot break, so fall back to the arbitrary graph.
+        var fixedEntityToOrder = new IdentityHashMap<Object, Integer>();
+        var queue = new ArrayDeque<>();
+        for (var entry : fixedEntityToInDegree.entrySet()) {
+            if (entry.getValue().intValue() == 0) {
+                queue.add(entry.getKey());
+            }
+        }
+        var order = 0;
+        while (!queue.isEmpty()) {
+            var entity = queue.poll();
+            fixedEntityToOrder.put(entity, order++);
+            var successorList = fixedEntityToSuccessorList.get(entity);
+            if (successorList != null) {
+                for (var successor : successorList) {
+                    if (fixedEntityToInDegree.get(successor).decrement() == 0) {
+                        queue.add(successor);
+                    }
+                }
+            }
+        }
+        if (fixedEntityToOrder.size() != fixedEntityToInDegree.size()) {
+            return buildArbitraryGraph(graphDescriptor);
+        }
+
+        var fixedEntityToSuccessors = new IdentityHashMap<Object, Object[]>();
+        for (var entry : fixedEntityToSuccessorList.entrySet()) {
+            fixedEntityToSuccessors.put(entry.getKey(), entry.getValue().toArray());
+        }
+
+        var listVariableDescriptor =
+                Objects.requireNonNull(graphDescriptor.solutionDescriptor().getListVariableDescriptor());
+        // The topologically first chain element is the list's first element for a previous parent,
+        // but the list's last element for a next parent, whose successor function walks backwards.
+        var isPreviousDirection = graphStructureAndDirection.direction() == ParentVariableType.PREVIOUS;
+        Function<Object, @Nullable Object> fixedEntityToFirstChainedEntity = fixedEntity -> {
+            var elementList = listVariableDescriptor.getValue(fixedEntity);
+            if (elementList.isEmpty()) {
+                return null;
+            }
+            return isPreviousDirection ? elementList.get(0) : elementList.get(elementList.size() - 1);
+        };
+        var topologicalSorter = getTopologicalSorter(graphDescriptor.solutionDescriptor(),
+                Objects.requireNonNull(graphDescriptor.changedVariableNotifier().innerScoreDirector()),
+                Objects.requireNonNull(graphStructureAndDirection.direction()));
+        var canTerminateEarly = hasNoNonDeclarativeSourcesFromParent(declarativeShadowVariables);
+
+        return new MultiEntitySingleDirectionalParentVariableReferenceGraph<>(
+                graphDescriptor.consistencyTracker(),
+                chainedDescriptorList,
+                preChainFixedDescriptorList,
+                postChainFixedDescriptorList,
+                topologicalSorter,
+                graphDescriptor.changedVariableNotifier(),
+                canTerminateEarly,
+                fixedEntityToFirstChainedEntity,
+                fixedEntityToOrder,
+                fixedEntityToSuccessors,
+                entities);
     }
 
     private static <Solution_> boolean hasNoNonDeclarativeSourcesFromParent(
