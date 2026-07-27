@@ -1,6 +1,7 @@
 package ai.timefold.solver.core.impl.domain.variable.declarative;
 
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -37,6 +38,16 @@ public abstract sealed class AbstractVariableReferenceGraph<Solution_, ChangeTra
      * false otherwise.
      */
     protected boolean isUpdating;
+
+    /**
+     * True if an edge was added to or removed from the {@link #graph}
+     * since the last {@link #commitPendingEdgeChanges(BitSet)},
+     * false if the {@link #graph} has no pending edge changes.
+     * <p>
+     * Starts as true, because the topological order of a node
+     * is only known after the first commit, even for a graph without any edges.
+     */
+    private boolean hasPendingEdgeChanges = true;
 
     AbstractVariableReferenceGraph(VariableReferenceGraphBuilder<Solution_> outerGraph,
             IntFunction<TopologicalOrderGraph> graphCreator) {
@@ -140,6 +151,7 @@ public abstract sealed class AbstractVariableReferenceGraph<Solution_, ChangeTra
         var count = edgeCount[fromNodeId].getCount(toNodeId);
         if (count == 0) {
             graph.addEdge(fromNodeId, toNodeId);
+            hasPendingEdgeChanges = true;
         }
         edgeCount[fromNodeId].increment(toNodeId);
         markChanged(to);
@@ -155,9 +167,31 @@ public abstract sealed class AbstractVariableReferenceGraph<Solution_, ChangeTra
         var count = edgeCount[fromNodeId].getCount(toNodeId);
         if (count == 1) {
             graph.removeEdge(fromNodeId, toNodeId);
+            hasPendingEdgeChanges = true;
         }
         edgeCount[fromNodeId].decrement(toNodeId);
         markChanged(to);
+    }
+
+    /**
+     * Recomputes the topological order of the {@link #graph},
+     * unless no edge was added or removed since the last time this method was called.
+     * <p>
+     * Skipping the recomputation is safe because the topological order and the strongly connected components
+     * only depend on the edges: when no edge changed, no node can have moved to a different position
+     * or to a different component.
+     * This matters because a recomputation costs time proportional to the size of the entire graph,
+     * whereas a move typically only changes the variables of a handful of entities.
+     *
+     * @param changed The ids of the nodes whose variables need to be recomputed;
+     *        {@link TopologicalOrderGraph#commitChanges(BitSet)} adds the nodes whose looped status changed.
+     */
+    protected final void commitPendingEdgeChanges(BitSet changed) {
+        if (!hasPendingEdgeChanges) {
+            return;
+        }
+        graph.commitChanges(changed);
+        hasPendingEdgeChanges = false;
     }
 
     @Override

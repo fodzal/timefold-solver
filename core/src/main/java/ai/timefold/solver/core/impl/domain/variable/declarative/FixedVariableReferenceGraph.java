@@ -22,7 +22,7 @@ public final class FixedVariableReferenceGraph<Solution_>
         super(outerGraph, graphCreator);
         isChanged = new BitSet(nodeList.size());
         cachedComponentForwardEdges = new int[nodeList.size()][];
-        graph.commitChanges(isChanged);
+        commitPendingEdgeChanges(isChanged);
         isChanged.clear();
         isFinalized = true;
 

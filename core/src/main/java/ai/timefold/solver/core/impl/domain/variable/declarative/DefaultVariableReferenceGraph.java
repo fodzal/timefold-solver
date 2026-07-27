@@ -53,7 +53,7 @@ final class DefaultVariableReferenceGraph<Solution_> extends AbstractVariableRef
         if (changeTracker.isEmpty()) {
             return;
         }
-        graph.commitChanges(changeTracker);
+        commitPendingEdgeChanges(changeTracker);
         affectedEntitiesUpdater.accept(changeTracker);
     }
 
@@ -61,7 +61,7 @@ final class DefaultVariableReferenceGraph<Solution_> extends AbstractVariableRef
      * See {@link ConsistencyTracker#setUnknownConsistencyFromEntityShadowVariablesInconsistent}
      */
     public void setUnknownInconsistencyValues() {
-        graph.commitChanges(changeTracker);
+        commitPendingEdgeChanges(changeTracker);
         affectedEntitiesUpdater.setUnknownInconsistencyValues();
     }
 }
