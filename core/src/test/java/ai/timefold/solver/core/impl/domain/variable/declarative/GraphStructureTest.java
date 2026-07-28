@@ -48,6 +48,15 @@ import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_next.Testdat
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_rebase.TestdataMultiEntityChainRebaseSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_rebase.TestdataMultiEntityChainRebaseVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_rebase.TestdataMultiEntityChainRebaseVisit;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_precedence.TestdataPrecedenceSolution;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_precedence.TestdataPrecedenceVehicle;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_precedence.TestdataPrecedenceVisit;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_precedence_fallback.TestdataDisjointPrecedenceSolution;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_precedence_fallback.TestdataDisjointPrecedenceVehicle;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_precedence_fallback.TestdataDisjointPrecedenceVisit;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_precedence_group.TestdataGroupPrecedenceSolution;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_precedence_group.TestdataGroupPrecedenceVehicle;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_precedence_group.TestdataGroupPrecedenceVisit;
 import ai.timefold.solver.core.testdomain.shadow.simple_list.TestdataDeclarativeSimpleListSolution;
 import ai.timefold.solver.core.testdomain.shadow.simple_list.TestdataDeclarativeSimpleListValue;
 
@@ -121,11 +130,15 @@ class GraphStructureTest {
 
     @Test
     void multiEntity() {
+        // The values' dependencies on each other are precedences,
+        // which the precedence-aware multi-entity graph supports.
         var entity = new TestdataMultiEntityDependencyEntity();
         var value = new TestdataMultiEntityDependencyValue();
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataMultiEntityDependencySolution.buildSolutionDescriptor(), entity, value))
-                .hasFieldOrPropertyWithValue("structure", ARBITRARY);
+                .hasFieldOrPropertyWithValue("structure",
+                        GraphStructure.MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT_WITH_PRECEDENCE)
+                .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS);
     }
 
     @Test
@@ -195,6 +208,45 @@ class GraphStructureTest {
                 TestdataMultiEntityChainRebaseSolution.buildSolutionDescriptor(), vehicle, visit))
                 .hasFieldOrPropertyWithValue("structure", GraphStructure.MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT)
                 .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS);
+    }
+
+    @Test
+    void multiEntityPrecedenceStructure() {
+        var vehicle = new TestdataPrecedenceVehicle("A", 0);
+        var visit1 = new TestdataPrecedenceVisit("v1", 1);
+        var visit2 = new TestdataPrecedenceVisit("v2", 1);
+        visit2.setRequiredPredecessor(visit1);
+        assertThat(GraphStructure.determineGraphStructure(
+                TestdataPrecedenceSolution.buildSolutionDescriptor(), vehicle, visit1, visit2))
+                .hasFieldOrPropertyWithValue("structure",
+                        GraphStructure.MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT_WITH_PRECEDENCE)
+                .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS);
+    }
+
+    @Test
+    void multiEntityGroupPrecedenceStructure() {
+        var vehicle = new TestdataGroupPrecedenceVehicle("A", 0);
+        var visit1 = new TestdataGroupPrecedenceVisit("v1", 1);
+        var visit2 = new TestdataGroupPrecedenceVisit("v2", 1);
+        visit2.getRequiredPredecessorList().add(visit1);
+        assertThat(GraphStructure.determineGraphStructure(
+                TestdataGroupPrecedenceSolution.buildSolutionDescriptor(), vehicle, visit1, visit2))
+                .hasFieldOrPropertyWithValue("structure",
+                        GraphStructure.MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT_WITH_PRECEDENCE)
+                .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS);
+    }
+
+    @Test
+    void multiEntityPrecedenceWithDisjointVariablesFallsBack() {
+        // The precedence targets arrivalTime, which cannot reach departureTime,
+        // the variable other visits read, so entity-level cycle detection would be inexact.
+        var vehicle = new TestdataDisjointPrecedenceVehicle("A", 0);
+        var visit1 = new TestdataDisjointPrecedenceVisit("v1", 1);
+        var visit2 = new TestdataDisjointPrecedenceVisit("v2", 1);
+        visit2.setRequiredPredecessor(visit1);
+        assertThat(GraphStructure.determineGraphStructure(
+                TestdataDisjointPrecedenceSolution.buildSolutionDescriptor(), vehicle, visit1, visit2))
+                .hasFieldOrPropertyWithValue("structure", ARBITRARY);
     }
 
     @Test

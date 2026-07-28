@@ -18,6 +18,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.IntFunction;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
 import ai.timefold.solver.core.api.function.TriFunction;
@@ -190,6 +191,14 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 }
                 yield buildMultiEntitySingleDirectionalParentGraph(graphDescriptor, graphStructureAndDirection);
             }
+            case MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT_WITH_PRECEDENCE -> {
+                var scoreDirector =
+                        graphDescriptor.variableReferenceGraphBuilder().changedVariableNotifier.innerScoreDirector();
+                if (scoreDirector == null) {
+                    yield buildArbitraryGraph(graphDescriptor);
+                }
+                yield buildMultiEntityPrecedenceGraph(graphDescriptor, graphStructureAndDirection);
+            }
             case ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE ->
                 buildArbitrarySingleEntityGraph(graphDescriptor);
             case NO_DYNAMIC_EDGES, ARBITRARY ->
@@ -220,10 +229,111 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             GraphDescriptor<Solution_> graphDescriptor,
             GraphStructure.GraphStructureAndDirection graphStructureAndDirection) {
         var declarativeShadowVariables = graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors();
-        var sortedDeclarativeVariables = topologicallySortedDeclarativeShadowVariables(declarativeShadowVariables);
         var chainedEntityClass = Objects.requireNonNull(graphStructureAndDirection.parentMetaModel())
                 .entity().type();
+        var split = splitMultiEntityDescriptors(declarativeShadowVariables, chainedEntityClass);
+        if (split.preChainFixedDescriptorList().isEmpty() && split.postChainFixedDescriptorList().isEmpty()) {
+            return buildSingleDirectionalParentGraph(graphDescriptor, graphStructureAndDirection);
+        }
+        var entities = graphDescriptor.entities();
+        var fixedEntityDag = buildFixedEntityDag(split, entities);
+        if (fixedEntityDag == null) {
+            // The fact DAG has a cycle, which this graph cannot break, so fall back to the arbitrary graph.
+            return buildArbitraryGraph(graphDescriptor);
+        }
+        var topologicalSorter = getTopologicalSorter(graphDescriptor.solutionDescriptor(),
+                Objects.requireNonNull(graphDescriptor.changedVariableNotifier().innerScoreDirector()),
+                Objects.requireNonNull(graphStructureAndDirection.direction()));
+        var canTerminateEarly = hasNoNonDeclarativeSourcesFromParent(declarativeShadowVariables);
+        var isPreviousDirection = graphStructureAndDirection.direction() == ParentVariableType.PREVIOUS;
 
+        return new MultiEntitySingleDirectionalParentVariableReferenceGraph<>(
+                graphDescriptor.consistencyTracker(),
+                split.chainedDescriptorList(),
+                split.preChainFixedDescriptorList(),
+                split.postChainFixedDescriptorList(),
+                topologicalSorter,
+                graphDescriptor.changedVariableNotifier(),
+                canTerminateEarly,
+                getFixedEntityToBoundaryChainedEntity(graphDescriptor, isPreviousDirection),
+                fixedEntityDag.entityToOrder(),
+                fixedEntityDag.entityToSuccessors(),
+                entities);
+    }
+
+    static <Solution_> VariableReferenceGraph buildMultiEntityPrecedenceGraph(
+            GraphDescriptor<Solution_> graphDescriptor,
+            GraphStructure.GraphStructureAndDirection graphStructureAndDirection) {
+        var declarativeShadowVariables = graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors();
+        var chainedEntityClass = Objects.requireNonNull(graphStructureAndDirection.parentMetaModel())
+                .entity().type();
+        var split = splitMultiEntityDescriptors(declarativeShadowVariables, chainedEntityClass);
+        var entities = graphDescriptor.entities();
+        var fixedEntityDag = buildFixedEntityDag(split, entities);
+        if (fixedEntityDag == null) {
+            // The fact DAG has a cycle, which this graph cannot break, so fall back to the arbitrary graph.
+            return buildArbitraryGraph(graphDescriptor);
+        }
+        var precedenceEdgeMaps = buildPrecedenceEdgeMaps(split.chainedDescriptorList(), chainedEntityClass, entities);
+        if (precedenceEdgeMaps == null) {
+            // The precedence facts themselves have a cycle;
+            // fall back to the arbitrary graph, which fail-fasts on it.
+            return buildArbitraryGraph(graphDescriptor);
+        }
+        var postChainVariableSet = GraphStructure.computePostChainVariables(declarativeShadowVariables, chainedEntityClass);
+        var fixedTierEdgeMaps = buildFixedTierEdgeMaps(split, postChainVariableSet, entities);
+        var analysis = GraphStructure.analyzePrecedenceVariables(declarativeShadowVariables, chainedEntityClass);
+        var precedenceStructure = new MultiEntityPrecedenceVariableReferenceGraph.PrecedenceStructure(
+                precedenceEdgeMaps.predecessorMap(),
+                precedenceEdgeMaps.successorMap(),
+                fixedTierEdgeMaps.incomingTierEdgeMap(),
+                fixedTierEdgeMaps.outgoingTierEdgeMap(),
+                analysis.staticPreToPostDependency(),
+                analysis.chainedSusceptibleVariableSet(),
+                analysis.preChainSusceptibleVariableSet());
+
+        var scoreDirector = Objects.requireNonNull(graphDescriptor.changedVariableNotifier().innerScoreDirector());
+        var topologicalSorter = getTopologicalSorter(graphDescriptor.solutionDescriptor(), scoreDirector,
+                Objects.requireNonNull(graphStructureAndDirection.direction()));
+        var canTerminateEarly = hasNoNonDeclarativeSourcesFromParent(declarativeShadowVariables);
+        var isPreviousDirection = graphStructureAndDirection.direction() == ParentVariableType.PREVIOUS;
+        var listStateSupply = scoreDirector
+                .getListVariableStateSupply(graphDescriptor.solutionDescriptor().getListVariableDescriptor());
+        UnaryOperator<@Nullable Object> previousInChain = isPreviousDirection
+                ? listStateSupply::getPreviousElement
+                : listStateSupply::getNextElement;
+
+        return new MultiEntityPrecedenceVariableReferenceGraph<>(
+                graphDescriptor.consistencyTracker(),
+                split.chainedDescriptorList(),
+                split.preChainFixedDescriptorList(),
+                split.postChainFixedDescriptorList(),
+                topologicalSorter,
+                previousInChain,
+                graphDescriptor.changedVariableNotifier(),
+                canTerminateEarly,
+                getFixedEntityToBoundaryChainedEntity(graphDescriptor, isPreviousDirection),
+                getFixedEntityToBoundaryChainedEntity(graphDescriptor, !isPreviousDirection),
+                fixedEntityDag.entityToOrder(),
+                fixedEntityDag.entityToSuccessors(),
+                precedenceStructure,
+                entities);
+    }
+
+    private record MultiEntityDescriptorSplit<Solution_>(
+            List<DeclarativeShadowVariableDescriptor<Solution_>> chainedDescriptorList,
+            List<DeclarativeShadowVariableDescriptor<Solution_>> preChainFixedDescriptorList,
+            List<DeclarativeShadowVariableDescriptor<Solution_>> postChainFixedDescriptorList) {
+
+        Class<?> fixedEntityClass() {
+            return (preChainFixedDescriptorList.isEmpty() ? postChainFixedDescriptorList
+                    : preChainFixedDescriptorList).get(0).getEntityDescriptor().getEntityClass();
+        }
+    }
+
+    private static <Solution_> MultiEntityDescriptorSplit<Solution_> splitMultiEntityDescriptors(
+            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariables, Class<?> chainedEntityClass) {
+        var sortedDeclarativeVariables = topologicallySortedDeclarativeShadowVariables(declarativeShadowVariables);
         var chainedDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
         var preChainFixedDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
         var postChainFixedDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
@@ -237,15 +347,21 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 preChainFixedDescriptorList.add(descriptor);
             }
         }
-        if (preChainFixedDescriptorList.isEmpty() && postChainFixedDescriptorList.isEmpty()) {
-            return buildSingleDirectionalParentGraph(graphDescriptor, graphStructureAndDirection);
-        }
+        return new MultiEntityDescriptorSplit<>(chainedDescriptorList, preChainFixedDescriptorList,
+                postChainFixedDescriptorList);
+    }
 
-        var fixedEntityClass = (preChainFixedDescriptorList.isEmpty() ? postChainFixedDescriptorList
-                : preChainFixedDescriptorList).get(0).getEntityDescriptor().getEntityClass();
-        var entities = graphDescriptor.entities();
+    private record FixedEntityDag(Map<Object, Integer> entityToOrder, Map<Object, Object[]> entityToSuccessors) {
+    }
 
-        // Build the fixed entities' DAG from their group sources.
+    /**
+     * Builds the fixed entities' DAG from their group sources
+     * and sorts it topologically with Kahn's algorithm.
+     * Returns null when the fact DAG has a cycle.
+     */
+    private static <Solution_> @Nullable FixedEntityDag buildFixedEntityDag(MultiEntityDescriptorSplit<Solution_> split,
+            Object[] entities) {
+        var fixedEntityClass = split.fixedEntityClass();
         var fixedEntityToInDegree = new IdentityHashMap<Object, MutableInt>();
         for (var entity : entities) {
             if (fixedEntityClass.isInstance(entity)) {
@@ -253,7 +369,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             }
         }
         var fixedEntityToSuccessorList = new IdentityHashMap<Object, List<Object>>();
-        for (var descriptorList : List.of(preChainFixedDescriptorList, postChainFixedDescriptorList)) {
+        for (var descriptorList : List.of(split.preChainFixedDescriptorList(), split.postChainFixedDescriptorList())) {
             for (var descriptor : descriptorList) {
                 for (var source : descriptor.getSources()) {
                     if (source.parentVariableType() != ParentVariableType.GROUP) {
@@ -272,8 +388,6 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             }
         }
 
-        // Kahn's algorithm; a leftover entity means the fact DAG has a cycle,
-        // which this graph cannot break, so fall back to the arbitrary graph.
         var fixedEntityToOrder = new IdentityHashMap<Object, Integer>();
         var queue = new ArrayDeque<>();
         for (var entry : fixedEntityToInDegree.entrySet()) {
@@ -295,43 +409,166 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             }
         }
         if (fixedEntityToOrder.size() != fixedEntityToInDegree.size()) {
-            return buildArbitraryGraph(graphDescriptor);
+            return null;
         }
 
         var fixedEntityToSuccessors = new IdentityHashMap<Object, Object[]>();
         for (var entry : fixedEntityToSuccessorList.entrySet()) {
             fixedEntityToSuccessors.put(entry.getKey(), entry.getValue().toArray());
         }
+        return new FixedEntityDag(fixedEntityToOrder, fixedEntityToSuccessors);
+    }
 
+    /**
+     * The topologically first chain element is the list's first element for a previous parent,
+     * but the list's last element for a next parent, whose successor function walks backwards.
+     */
+    private static <Solution_> Function<Object, @Nullable Object> getFixedEntityToBoundaryChainedEntity(
+            GraphDescriptor<Solution_> graphDescriptor, boolean fromListStart) {
         var listVariableDescriptor =
                 Objects.requireNonNull(graphDescriptor.solutionDescriptor().getListVariableDescriptor());
-        // The topologically first chain element is the list's first element for a previous parent,
-        // but the list's last element for a next parent, whose successor function walks backwards.
-        var isPreviousDirection = graphStructureAndDirection.direction() == ParentVariableType.PREVIOUS;
-        Function<Object, @Nullable Object> fixedEntityToFirstChainedEntity = fixedEntity -> {
+        return fixedEntity -> {
             var elementList = listVariableDescriptor.getValue(fixedEntity);
             if (elementList.isEmpty()) {
                 return null;
             }
-            return isPreviousDirection ? elementList.get(0) : elementList.get(elementList.size() - 1);
+            return fromListStart ? elementList.get(0) : elementList.get(elementList.size() - 1);
         };
-        var topologicalSorter = getTopologicalSorter(graphDescriptor.solutionDescriptor(),
-                Objects.requireNonNull(graphDescriptor.changedVariableNotifier().innerScoreDirector()),
-                Objects.requireNonNull(graphStructureAndDirection.direction()));
-        var canTerminateEarly = hasNoNonDeclarativeSourcesFromParent(declarativeShadowVariables);
+    }
 
-        return new MultiEntitySingleDirectionalParentVariableReferenceGraph<>(
-                graphDescriptor.consistencyTracker(),
-                chainedDescriptorList,
-                preChainFixedDescriptorList,
-                postChainFixedDescriptorList,
-                topologicalSorter,
-                graphDescriptor.changedVariableNotifier(),
-                canTerminateEarly,
-                fixedEntityToFirstChainedEntity,
-                fixedEntityToOrder,
-                fixedEntityToSuccessors,
-                entities);
+    private record PrecedenceEdgeMaps(Map<Object, Object[]> predecessorMap, Map<Object, Object[]> successorMap) {
+    }
+
+    /**
+     * Builds the static precedence edges between chained entities from their fact sources.
+     * Returns null when the precedence facts themselves form a cycle,
+     * which no assignment can make consistent.
+     */
+    private static <Solution_> @Nullable PrecedenceEdgeMaps buildPrecedenceEdgeMaps(
+            List<DeclarativeShadowVariableDescriptor<Solution_>> chainedDescriptorList,
+            Class<?> chainedEntityClass, Object[] entities) {
+        var predecessorSetMap = new IdentityHashMap<Object, Set<Object>>();
+        for (var descriptor : chainedDescriptorList) {
+            for (var source : descriptor.getSources()) {
+                var parentVariableType = source.parentVariableType();
+                if (parentVariableType != ParentVariableType.INDIRECT
+                        && parentVariableType != ParentVariableType.GROUP) {
+                    continue;
+                }
+                for (var entity : entities) {
+                    if (!chainedEntityClass.isInstance(entity)) {
+                        continue;
+                    }
+                    source.valueEntityFunction().accept(entity, predecessor -> {
+                        if (chainedEntityClass.isInstance(predecessor)) {
+                            predecessorSetMap
+                                    .computeIfAbsent(entity,
+                                            ignored -> Collections.newSetFromMap(new IdentityHashMap<>()))
+                                    .add(predecessor);
+                        }
+                    });
+                }
+            }
+        }
+
+        // Kahn's algorithm over the precedence edges to detect a static cycle.
+        var successorListMap = new IdentityHashMap<Object, List<Object>>();
+        var inDegreeMap = new IdentityHashMap<Object, MutableInt>();
+        for (var entry : predecessorSetMap.entrySet()) {
+            inDegreeMap.computeIfAbsent(entry.getKey(), ignored -> new MutableInt());
+            for (var predecessor : entry.getValue()) {
+                inDegreeMap.computeIfAbsent(predecessor, ignored -> new MutableInt());
+                successorListMap.computeIfAbsent(predecessor, ignored -> new ArrayList<>()).add(entry.getKey());
+                inDegreeMap.get(entry.getKey()).increment();
+            }
+        }
+        var queue = new ArrayDeque<>();
+        for (var entry : inDegreeMap.entrySet()) {
+            if (entry.getValue().intValue() == 0) {
+                queue.add(entry.getKey());
+            }
+        }
+        var processedCount = 0;
+        while (!queue.isEmpty()) {
+            var entity = queue.poll();
+            processedCount++;
+            var successorList = successorListMap.get(entity);
+            if (successorList != null) {
+                for (var successor : successorList) {
+                    if (inDegreeMap.get(successor).decrement() == 0) {
+                        queue.add(successor);
+                    }
+                }
+            }
+        }
+        if (processedCount != inDegreeMap.size()) {
+            return null;
+        }
+
+        var predecessorMap = new IdentityHashMap<Object, Object[]>();
+        for (var entry : predecessorSetMap.entrySet()) {
+            predecessorMap.put(entry.getKey(), entry.getValue().toArray());
+        }
+        var successorMap = new IdentityHashMap<Object, Object[]>();
+        for (var entry : successorListMap.entrySet()) {
+            successorMap.put(entry.getKey(), entry.getValue().toArray());
+        }
+        return new PrecedenceEdgeMaps(predecessorMap, successorMap);
+    }
+
+    private record FixedTierEdgeMaps(
+            Map<Object, MultiEntityPrecedenceVariableReferenceGraph.FixedTierEdge[]> incomingTierEdgeMap,
+            Map<Object, MultiEntityPrecedenceVariableReferenceGraph.FixedTierEdge[]> outgoingTierEdgeMap) {
+    }
+
+    /**
+     * Builds the fixed entities' DAG edges refined by the variable tiers they connect,
+     * which the precedence graph needs to propagate inconsistency between fixed entities.
+     */
+    private static <Solution_> FixedTierEdgeMaps buildFixedTierEdgeMaps(MultiEntityDescriptorSplit<Solution_> split,
+            Set<VariableMetaModel<?, ?, ?>> postChainVariableSet, Object[] entities) {
+        var fixedEntityClass = split.fixedEntityClass();
+        var incomingListMap = new IdentityHashMap<Object, List<MultiEntityPrecedenceVariableReferenceGraph.FixedTierEdge>>();
+        var outgoingListMap = new IdentityHashMap<Object, List<MultiEntityPrecedenceVariableReferenceGraph.FixedTierEdge>>();
+        for (var descriptorList : List.of(split.preChainFixedDescriptorList(), split.postChainFixedDescriptorList())) {
+            for (var descriptor : descriptorList) {
+                var targetPost = postChainVariableSet.contains(descriptor.getVariableMetaModel());
+                for (var source : descriptor.getSources()) {
+                    if (source.parentVariableType() != ParentVariableType.GROUP) {
+                        continue;
+                    }
+                    var sourcePost = source.variableSourceReferences().stream()
+                            .filter(VariableSourceReference::isDeclarative)
+                            .anyMatch(reference -> postChainVariableSet.contains(reference.variableMetaModel()));
+                    for (var entity : entities) {
+                        if (!fixedEntityClass.isInstance(entity)) {
+                            continue;
+                        }
+                        source.valueEntityFunction().accept(entity, predecessor -> {
+                            if (fixedEntityClass.isInstance(predecessor) && predecessor != entity) {
+                                incomingListMap.computeIfAbsent(entity, ignored -> new ArrayList<>())
+                                        .add(new MultiEntityPrecedenceVariableReferenceGraph.FixedTierEdge(
+                                                predecessor, sourcePost, targetPost));
+                                outgoingListMap.computeIfAbsent(predecessor, ignored -> new ArrayList<>())
+                                        .add(new MultiEntityPrecedenceVariableReferenceGraph.FixedTierEdge(
+                                                entity, sourcePost, targetPost));
+                            }
+                        });
+                    }
+                }
+            }
+        }
+        var incomingTierEdgeMap = new IdentityHashMap<Object, MultiEntityPrecedenceVariableReferenceGraph.FixedTierEdge[]>();
+        for (var entry : incomingListMap.entrySet()) {
+            incomingTierEdgeMap.put(entry.getKey(),
+                    entry.getValue().toArray(new MultiEntityPrecedenceVariableReferenceGraph.FixedTierEdge[0]));
+        }
+        var outgoingTierEdgeMap = new IdentityHashMap<Object, MultiEntityPrecedenceVariableReferenceGraph.FixedTierEdge[]>();
+        for (var entry : outgoingListMap.entrySet()) {
+            outgoingTierEdgeMap.put(entry.getKey(),
+                    entry.getValue().toArray(new MultiEntityPrecedenceVariableReferenceGraph.FixedTierEdge[0]));
+        }
+        return new FixedTierEdgeMaps(incomingTierEdgeMap, outgoingTierEdgeMap);
     }
 
     private static <Solution_> boolean hasNoNonDeclarativeSourcesFromParent(

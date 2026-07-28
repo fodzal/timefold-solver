@@ -1,8 +1,12 @@
 package ai.timefold.solver.core.impl.domain.variable.declarative;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import ai.timefold.solver.core.impl.domain.solution.descriptor.SolutionDescriptor;
@@ -51,6 +55,19 @@ public enum GraphStructure {
      * Such a graph cannot be inconsistent.
      */
     MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT,
+
+    /**
+     * A {@link #MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT} structure whose chained entities
+     * may additionally depend on declarative variables of other chained entities
+     * through facts (precedences, e.g. a visit that must start after another visit ends).
+     * The precedence edges are static, but combined with the dynamic chains
+     * they can form dependency cycles, so the graph detects cycles
+     * on a condensed graph of the precedence-linked entities
+     * and marks the affected entities inconsistent, like the arbitrary graph does.
+     * The detection only accepts models whose static variable dependencies
+     * make that entity-level cycle detection exact.
+     */
+    MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT_WITH_PRECEDENCE,
 
     /**
      * A graph structure that accepts all graphs that only have a single
@@ -142,11 +159,12 @@ public enum GraphStructure {
         }
 
         // Most specific structure first; each structure has its own predicate.
-        if (directionalType != null && directionalEntityClass != null
-                && isMultiEntityDirectional(solutionDescriptor, declarativeShadowVariableDescriptors,
-                        rootVariableSources, directionalEntityClass)) {
-            return new GraphStructureAndDirection(MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT, parentMetaModel,
-                    directionalType);
+        if (directionalType != null && directionalEntityClass != null) {
+            var multiEntityStructure = determineMultiEntityStructure(solutionDescriptor,
+                    declarativeShadowVariableDescriptors, rootVariableSources, directionalEntityClass);
+            if (multiEntityStructure != null) {
+                return new GraphStructureAndDirection(multiEntityStructure, parentMetaModel, directionalType);
+            }
         }
 
         if (isArbitrary) {
@@ -162,13 +180,18 @@ public enum GraphStructure {
     }
 
     /**
-     * True if the model has exactly two declarative entity classes,
-     * where the chained class only uses its chain or the fixed class's pre-chain declarative variables,
+     * Returns the multi-entity structure the model fits, or null when it fits none.
+     * The model must have exactly two declarative entity classes,
+     * where the chained class only uses its chain, the fixed class's pre-chain declarative variables
+     * or fact paths to declarative variables of other chained entities (precedences),
      * and the fixed class only depends on the chained class through the list variable's own elements.
      * The fixed class must own the planning list variable and its entities may only depend on each other
      * through declarative variables reached from fact collections, which form a static DAG.
+     * When precedences are present, the static variable dependencies must additionally
+     * make entity-level cycle detection exact (see {@link #isPrecedenceCycleDetectionExact}),
+     * and the result is {@link #MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT_WITH_PRECEDENCE}.
      */
-    private static <Solution_> boolean isMultiEntityDirectional(
+    private static <Solution_> @Nullable GraphStructure determineMultiEntityStructure(
             SolutionDescriptor<Solution_> solutionDescriptor,
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
             List<RootVariableSource<?, ?>> rootVariableSources,
@@ -178,12 +201,12 @@ public enum GraphStructure {
             declarativeEntityClassSet.add(descriptor.getEntityDescriptor().getEntityClass());
         }
         if (declarativeEntityClassSet.size() != 2) {
-            return false;
+            return null;
         }
         var hasAlignmentKey = declarativeShadowVariableDescriptors.stream()
                 .anyMatch(descriptor -> descriptor.getAlignmentKeyMap() != null);
         if (hasAlignmentKey) {
-            return false;
+            return null;
         }
         Class<?> fixedEntityClass = null;
         for (var entityClass : declarativeEntityClassSet) {
@@ -195,7 +218,7 @@ public enum GraphStructure {
                 || fixedEntityClass.isAssignableFrom(chainedEntityClass)
                 || chainedEntityClass.isAssignableFrom(fixedEntityClass)) {
             // Entities are classified with instanceof, so assignable classes would misroute updaters.
-            return false;
+            return null;
         }
         var listVariableDescriptor = solutionDescriptor.getListVariableDescriptor();
         if (listVariableDescriptor == null
@@ -203,9 +226,10 @@ public enum GraphStructure {
                 || !chainedEntityClass.isAssignableFrom(listVariableDescriptor.getElementType())) {
             // The graph maps each chained entity to its inverse and walks the fixed entity's list,
             // so the fixed class must own the list variable and the chained class must cover its elements.
-            return false;
+            return null;
         }
         var postChainVariableSet = computePostChainVariables(declarativeShadowVariableDescriptors, chainedEntityClass);
+        var hasPrecedenceSource = false;
         for (var variableSource : rootVariableSources) {
             var isChainedEntitySource = chainedEntityClass.isAssignableFrom(variableSource.rootEntity());
             var parentVariableType = variableSource.parentVariableType();
@@ -222,11 +246,22 @@ public enum GraphStructure {
                         if (references.size() < 2
                                 || !references.get(1).isDeclarative()
                                 || postChainVariableSet.contains(references.get(1).variableMetaModel())) {
-                            return false;
+                            return null;
                         }
                     }
+                    case INDIRECT, GROUP -> {
+                        // Only safe when it is a precedence: a fact path to a declarative variable
+                        // of another chained entity, whose edges are static.
+                        for (var reference : variableSource.variableSourceReferences()) {
+                            if (!reference.isDeclarative()
+                                    || !chainedEntityClass.isAssignableFrom(reference.variableMetaModel().entity().type())) {
+                                return null;
+                            }
+                        }
+                        hasPrecedenceSource = true;
+                    }
                     default -> {
-                        return false;
+                        return null;
                     }
                 }
             } else {
@@ -241,7 +276,7 @@ public enum GraphStructure {
                         for (var reference : variableSource.variableSourceReferences()) {
                             if (!reference.isDeclarative()
                                     || chainedEntityClass.isAssignableFrom(reference.variableMetaModel().entity().type())) {
-                                return false;
+                                return null;
                             }
                         }
                     }
@@ -252,18 +287,240 @@ public enum GraphStructure {
                         var reference = variableSource.variableSourceReferences().get(0);
                         if (!reference.chainFromRootEntityToVariableEntity().isEmpty()
                                 || !chainedEntityClass.isAssignableFrom(reference.variableMetaModel().entity().type())) {
-                            return false;
+                            return null;
                         }
                     }
                     default -> {
                         // A source reached through a genuine variable needs dynamic edges,
                         // which the static DAG cannot represent.
-                        return false;
+                        return null;
                     }
                 }
             }
         }
+        if (!hasPrecedenceSource) {
+            return MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT;
+        }
+        if (!isPrecedenceCycleDetectionExact(declarativeShadowVariableDescriptors, chainedEntityClass)) {
+            return null;
+        }
+        return MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT_WITH_PRECEDENCE;
+    }
+
+    /**
+     * With precedences, a cycle can pass through an entity by entering at one variable
+     * and leaving at another, e.g. entering a visit's startTime from a predecessor's endTime
+     * and leaving through its own endTime towards the next visit in the chain.
+     * The precedence graph tracks cycles per entity (and per pre-chain/post-chain tier
+     * for the fixed class), which matches the arbitrary graph's per-variable tracking
+     * only if within an entity, every variable a cycle can enter at
+     * reaches every variable a cycle can leave from.
+     * This checks that statically; models failing it fall back to the arbitrary graph.
+     */
+    static <Solution_> boolean isPrecedenceCycleDetectionExact(
+            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
+            Class<?> chainedEntityClass) {
+        var chainedReachability =
+                computeWithinEntityReachability(declarativeShadowVariableDescriptors, chainedEntityClass, true);
+        var fixedReachability =
+                computeWithinEntityReachability(declarativeShadowVariableDescriptors, chainedEntityClass, false);
+        var inOutSets = computePrecedenceInOutSets(declarativeShadowVariableDescriptors, chainedEntityClass);
+        return allPairsReach(inOutSets.chainedInSet(), inOutSets.chainedOutSet(), chainedReachability)
+                && allPairsReach(inOutSets.preInSet(), inOutSets.preOutSet(), fixedReachability)
+                && allPairsReach(inOutSets.postInSet(), inOutSets.postOutSet(), fixedReachability)
+                && isReachabilityUniform(inOutSets.preInSet(), inOutSets.postOutSet(), fixedReachability);
+    }
+
+    /**
+     * The results of the static variable analysis needed to build the precedence graph:
+     * the variables a cycle can affect (whose values are nulled on inconsistent entities)
+     * and whether a fixed entity's post-chain variables depend on its pre-chain variables
+     * without going through the elements.
+     */
+    record PrecedenceVariableAnalysis(Set<VariableMetaModel<?, ?, ?>> chainedSusceptibleVariableSet,
+            Set<VariableMetaModel<?, ?, ?>> preChainSusceptibleVariableSet,
+            boolean staticPreToPostDependency) {
+    }
+
+    static <Solution_> PrecedenceVariableAnalysis analyzePrecedenceVariables(
+            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
+            Class<?> chainedEntityClass) {
+        var chainedReachability =
+                computeWithinEntityReachability(declarativeShadowVariableDescriptors, chainedEntityClass, true);
+        var fixedReachability =
+                computeWithinEntityReachability(declarativeShadowVariableDescriptors, chainedEntityClass, false);
+        var inOutSets = computePrecedenceInOutSets(declarativeShadowVariableDescriptors, chainedEntityClass);
+        var chainedSusceptibleVariableSet = new LinkedHashSet<VariableMetaModel<?, ?, ?>>();
+        for (var in : inOutSets.chainedInSet()) {
+            chainedSusceptibleVariableSet.addAll(chainedReachability.get(in));
+        }
+        var preChainSusceptibleVariableSet = new LinkedHashSet<VariableMetaModel<?, ?, ?>>();
+        for (var in : inOutSets.preInSet()) {
+            preChainSusceptibleVariableSet.addAll(fixedReachability.get(in));
+        }
+        var staticPreToPostDependency = false;
+        for (var in : inOutSets.preInSet()) {
+            for (var out : inOutSets.postOutSet()) {
+                staticPreToPostDependency |= fixedReachability.get(in).contains(out);
+            }
+        }
+        return new PrecedenceVariableAnalysis(chainedSusceptibleVariableSet, preChainSusceptibleVariableSet,
+                staticPreToPostDependency);
+    }
+
+    /**
+     * The variables a cycle can enter an entity at (in) and leave it from (out),
+     * per entity class and, for the fixed class, per pre-chain/post-chain tier.
+     */
+    private record PrecedenceInOutSets(Set<VariableMetaModel<?, ?, ?>> chainedInSet,
+            Set<VariableMetaModel<?, ?, ?>> chainedOutSet,
+            Set<VariableMetaModel<?, ?, ?>> preInSet,
+            Set<VariableMetaModel<?, ?, ?>> preOutSet,
+            Set<VariableMetaModel<?, ?, ?>> postInSet,
+            Set<VariableMetaModel<?, ?, ?>> postOutSet) {
+    }
+
+    private static <Solution_> PrecedenceInOutSets computePrecedenceInOutSets(
+            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
+            Class<?> chainedEntityClass) {
+        var postChainVariableSet = computePostChainVariables(declarativeShadowVariableDescriptors, chainedEntityClass);
+        var inOutSets = new PrecedenceInOutSets(new LinkedHashSet<>(), new LinkedHashSet<>(), new LinkedHashSet<>(),
+                new LinkedHashSet<>(), new LinkedHashSet<>(), new LinkedHashSet<>());
+        for (var descriptor : declarativeShadowVariableDescriptors) {
+            var isChained = chainedEntityClass.isAssignableFrom(descriptor.getEntityDescriptor().getEntityClass());
+            var targetVariable = descriptor.getVariableMetaModel();
+            for (var source : descriptor.getSources()) {
+                var declarativeReferences = source.variableSourceReferences().stream()
+                        .filter(VariableSourceReference::isDeclarative)
+                        .map(VariableSourceReference::variableMetaModel)
+                        .toList();
+                if (isChained) {
+                    switch (source.parentVariableType()) {
+                        case PREVIOUS, NEXT, INVERSE, INDIRECT, GROUP -> {
+                            // Only declarative references participate in cycles;
+                            // e.g. a bare previous reference is not computed by the graph.
+                            if (!declarativeReferences.isEmpty()) {
+                                inOutSets.chainedInSet().add(targetVariable);
+                                for (var reference : declarativeReferences) {
+                                    if (chainedEntityClass.isAssignableFrom(reference.entity().type())) {
+                                        inOutSets.chainedOutSet().add(reference);
+                                    } else if (source.parentVariableType() == ParentVariableType.INVERSE) {
+                                        // A pre-chain variable read through an inverse
+                                        // is an out point of the fixed class's pre-chain tier.
+                                        inOutSets.preOutSet().add(reference);
+                                    }
+                                }
+                            }
+                        }
+                        default -> {
+                            // NO_PARENT sources stay within the entity.
+                        }
+                    }
+                } else {
+                    switch (source.parentVariableType()) {
+                        case GROUP -> {
+                            var isPostTarget = postChainVariableSet.contains(targetVariable);
+                            (isPostTarget ? inOutSets.postInSet() : inOutSets.preInSet()).add(targetVariable);
+                            for (var reference : declarativeReferences) {
+                                (postChainVariableSet.contains(reference) ? inOutSets.postOutSet()
+                                        : inOutSets.preOutSet()).add(reference);
+                            }
+                        }
+                        case LIST_ELEMENT -> {
+                            inOutSets.postInSet().add(targetVariable);
+                            // The referenced element variable is an out point of the chained class.
+                            inOutSets.chainedOutSet().add(source.variableSourceReferences().get(0).variableMetaModel());
+                        }
+                        default -> {
+                            // NO_PARENT sources stay within the entity.
+                        }
+                    }
+                }
+            }
+        }
+        return inOutSets;
+    }
+
+    /**
+     * Computes for each declarative variable of the chained (or fixed) class
+     * the set of declarative variables of the same class that transitively depend on it,
+     * following only same-instance references (sources without a parent variable).
+     * A variable is included in its own set.
+     */
+    static <Solution_> Map<VariableMetaModel<?, ?, ?>, Set<VariableMetaModel<?, ?, ?>>> computeWithinEntityReachability(
+            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
+            Class<?> chainedEntityClass, boolean forChainedClass) {
+        var edgeMap = new LinkedHashMap<VariableMetaModel<?, ?, ?>, Set<VariableMetaModel<?, ?, ?>>>();
+        var variableList = new ArrayList<VariableMetaModel<?, ?, ?>>();
+        for (var descriptor : declarativeShadowVariableDescriptors) {
+            var isChained = chainedEntityClass.isAssignableFrom(descriptor.getEntityDescriptor().getEntityClass());
+            if (isChained != forChainedClass) {
+                continue;
+            }
+            variableList.add(descriptor.getVariableMetaModel());
+            for (var source : descriptor.getSources()) {
+                if (source.parentVariableType() != ParentVariableType.NO_PARENT) {
+                    continue;
+                }
+                for (var reference : source.variableSourceReferences()) {
+                    if (reference.isDeclarative() && reference.isTopLevel()) {
+                        edgeMap.computeIfAbsent(reference.variableMetaModel(), ignored -> new LinkedHashSet<>())
+                                .add(descriptor.getVariableMetaModel());
+                    }
+                }
+            }
+        }
+        var reachabilityMap = new LinkedHashMap<VariableMetaModel<?, ?, ?>, Set<VariableMetaModel<?, ?, ?>>>();
+        for (var variable : variableList) {
+            var reachableSet = new LinkedHashSet<VariableMetaModel<?, ?, ?>>();
+            var queue = new ArrayDeque<VariableMetaModel<?, ?, ?>>();
+            queue.add(variable);
+            while (!queue.isEmpty()) {
+                var current = queue.poll();
+                if (!reachableSet.add(current)) {
+                    continue;
+                }
+                var successors = edgeMap.get(current);
+                if (successors != null) {
+                    queue.addAll(successors);
+                }
+            }
+            reachabilityMap.put(variable, reachableSet);
+        }
+        return reachabilityMap;
+    }
+
+    private static boolean allPairsReach(Set<VariableMetaModel<?, ?, ?>> inSet, Set<VariableMetaModel<?, ?, ?>> outSet,
+            Map<VariableMetaModel<?, ?, ?>, Set<VariableMetaModel<?, ?, ?>>> reachabilityMap) {
+        for (var in : inSet) {
+            var reachableSet = reachabilityMap.get(in);
+            for (var out : outSet) {
+                if (reachableSet == null || !reachableSet.contains(out)) {
+                    return false;
+                }
+            }
+        }
         return true;
+    }
+
+    private static boolean isReachabilityUniform(Set<VariableMetaModel<?, ?, ?>> inSet,
+            Set<VariableMetaModel<?, ?, ?>> outSet,
+            Map<VariableMetaModel<?, ?, ?>, Set<VariableMetaModel<?, ?, ?>>> reachabilityMap) {
+        // The pre-chain to post-chain dependency within a fixed entity is modeled
+        // as a single condensed edge, so it must either hold for every in/out pair or for none.
+        var anyReach = false;
+        var anyMiss = false;
+        for (var in : inSet) {
+            var reachableSet = reachabilityMap.get(in);
+            for (var out : outSet) {
+                if (reachableSet != null && reachableSet.contains(out)) {
+                    anyReach = true;
+                } else {
+                    anyMiss = true;
+                }
+            }
+        }
+        return !(anyReach && anyMiss);
     }
 
     /**

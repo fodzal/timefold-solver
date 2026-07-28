@@ -6,7 +6,8 @@ import ai.timefold.solver.core.preview.api.domain.metamodel.VariableMetaModel;
 
 public sealed interface VariableReferenceGraph
         permits AbstractVariableReferenceGraph, EmptyVariableReferenceGraph,
-        MultiEntitySingleDirectionalParentVariableReferenceGraph, SingleDirectionalParentVariableReferenceGraph {
+        MultiEntityPrecedenceVariableReferenceGraph, MultiEntitySingleDirectionalParentVariableReferenceGraph,
+        SingleDirectionalParentVariableReferenceGraph {
 
     /**
      * Update all declarative {@link ai.timefold.solver.core.api.domain.variable.ShadowVariable} that has
