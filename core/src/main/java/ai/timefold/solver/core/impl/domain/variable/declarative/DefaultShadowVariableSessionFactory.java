@@ -172,8 +172,14 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
     static <Solution_> VariableReferenceGraph buildGraphForStructureAndDirection(
             GraphStructure.GraphStructureAndDirection graphStructureAndDirection, GraphDescriptor<Solution_> graphDescriptor) {
         if (graphStructureAndDirection.listElementBlock() != null) {
-            // Placeholder until the block node graph lands: cover the whole model.
-            return buildArbitraryGraph(graphDescriptor);
+            var scoreDirector =
+                    graphDescriptor.variableReferenceGraphBuilder().changedVariableNotifier.innerScoreDirector();
+            if (scoreDirector == null) {
+                // Without a score director there is no list state supply to walk the lists with,
+                // so the whole model is covered by the arbitrary graph.
+                return buildArbitraryGraph(graphDescriptor);
+            }
+            return buildListElementBlockGraph(graphDescriptor, graphStructureAndDirection);
         }
         return switch (graphStructureAndDirection.structure()) {
             case EMPTY -> EmptyVariableReferenceGraph.INSTANCE;
@@ -208,6 +214,163 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 sortedDeclarativeVariables,
                 topologicalSorter, graphDescriptor.changedVariableNotifier(),
                 canTerminateEarly,
+                graphDescriptor.entities());
+    }
+
+    static <Solution_> VariableReferenceGraph buildListElementBlockGraph(
+            GraphDescriptor<Solution_> graphDescriptor,
+            GraphStructure.GraphStructureAndDirection graphStructureAndDirection) {
+        var solutionDescriptor = graphDescriptor.solutionDescriptor();
+        var elementEntityClass = Objects.requireNonNull(graphStructureAndDirection.listElementBlock()).elementEntityClass();
+        var allDescriptors = solutionDescriptor.getDeclarativeShadowVariableDescriptors();
+        var elementDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
+        var innerDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
+        for (var descriptor : allDescriptors) {
+            if (elementEntityClass.isAssignableFrom(descriptor.getEntityDescriptor().getEntityClass())) {
+                elementDescriptorList.add(descriptor);
+            } else {
+                innerDescriptorList.add(descriptor);
+            }
+        }
+        var sortedElementDescriptors = topologicallySortedDeclarativeShadowVariables(elementDescriptorList);
+        var listVariableDescriptor = Objects.requireNonNull(solutionDescriptor.getListVariableDescriptor());
+        @SuppressWarnings("unchecked")
+        var listVariableMetaModel = (VariableMetaModel<Solution_, ?, ?>) listVariableDescriptor.getVariableMetaModel();
+
+        // The pre-chain variables the elements read through their inverse:
+        // when one of them changes during an update, its entity's whole list must be walked,
+        // since any element may read it.
+        // These variables are declarative, so they only ever change through a notifier;
+        // wrapping it observes every such change, and the pre-chain to block node edges
+        // guarantee the flag is set before the entity's block node is processed.
+        var elementReadVariableSet = new LinkedHashSet<VariableMetaModel<?, ?, ?>>();
+        for (var descriptor : elementDescriptorList) {
+            for (var source : descriptor.getSources()) {
+                if (source.parentVariableType() == ParentVariableType.INVERSE) {
+                    elementReadVariableSet.add(source.variableSourceReferences().get(1).variableMetaModel());
+                }
+            }
+        }
+        var wholeChainOwnerSet = Collections.<Object> newSetFromMap(new IdentityHashMap<>());
+        var changedVariableNotifier = graphDescriptor.changedVariableNotifier();
+        var flaggingNotifier = elementReadVariableSet.isEmpty() ? changedVariableNotifier
+                : new ChangedVariableNotifier<>(
+                        changedVariableNotifier.beforeVariableChanged(),
+                        (variableDescriptor, entity) -> {
+                            if (elementReadVariableSet.contains(variableDescriptor.getVariableMetaModel())) {
+                                wholeChainOwnerSet.add(entity);
+                            }
+                            changedVariableNotifier.afterVariableChanged().accept(variableDescriptor, entity);
+                        },
+                        changedVariableNotifier.innerScoreDirector());
+
+        var innerGraphDescriptor = new GraphDescriptor<>(graphDescriptor.consistencyTracker(), solutionDescriptor,
+                new VariableReferenceGraphBuilder<>(flaggingNotifier), graphDescriptor.entities(),
+                graphDescriptor.graphCreator());
+        // Per-variable nodes for the non-element classes, whatever their structure:
+        // grouped single-entity nodes could put a pre-chain variable in a node ordered
+        // after the block node, breaking the pre-chain before block node guarantee.
+        populateArbitraryGraph(innerGraphDescriptor, innerDescriptorList, elementEntityClass);
+        var builder = innerGraphDescriptor.variableReferenceGraphBuilder();
+
+        // The elements' consistency follows their list entity's, so the block node reports
+        // its looped status through the list entity's consistency state.
+        var ownerEntityClass = listVariableDescriptor.getEntityDescriptor().getEntityClass();
+        var ownerConsistencyState = innerDescriptorList.stream()
+                .filter(descriptor -> descriptor.getEntityDescriptor().getEntityClass().isAssignableFrom(ownerEntityClass))
+                .findFirst()
+                .map(descriptor -> graphDescriptor.consistencyTracker()
+                        .getDeclarativeEntityConsistencyState(descriptor.getEntityDescriptor()))
+                .orElseThrow(() -> new IllegalStateException(
+                        "Impossible state: the list entity class (%s) has no declarative shadow variables."
+                                .formatted(ownerEntityClass)));
+        var elementConsistencyState = graphDescriptor.consistencyTracker()
+                .getDeclarativeEntityConsistencyState(sortedElementDescriptors.get(0).getEntityDescriptor());
+
+        // The topologically first chain element is the list's first element for a previous parent,
+        // but the list's last element for a next parent, whose successor function walks backwards.
+        var isPreviousDirection = graphStructureAndDirection.direction() == ParentVariableType.PREVIOUS;
+        Function<Object, @Nullable Object> ownerToFirstElement = owner -> {
+            var elementList = listVariableDescriptor.getValue(owner);
+            if (elementList.isEmpty()) {
+                return null;
+            }
+            return isPreviousDirection ? elementList.get(0) : elementList.get(elementList.size() - 1);
+        };
+        var topologicalSorter = getTopologicalSorter(solutionDescriptor,
+                Objects.requireNonNull(changedVariableNotifier.innerScoreDirector()),
+                Objects.requireNonNull(graphStructureAndDirection.direction()));
+        var canTerminateEarly = hasNoNonDeclarativeSourcesFromParent(elementDescriptorList);
+
+        var blockUpdater = new ListElementBlockUpdater<>(listVariableMetaModel, ownerConsistencyState,
+                elementConsistencyState, sortedElementDescriptors, topologicalSorter, ownerToFirstElement,
+                canTerminateEarly, wholeChainOwnerSet);
+
+        // One block node per list entity, keyed by the list variable itself, so both the graph
+        // construction and the after processors registered for the list element sources mark it.
+        var ownerList = new ArrayList<>();
+        for (var entity : graphDescriptor.entities()) {
+            if (ownerEntityClass.isInstance(entity)) {
+                ownerList.add(entity);
+                builder.addVariableReferenceEntity(entity, List.of(blockUpdater));
+            }
+        }
+
+        // The post-chain variables with direct list element sources get an edge from the block
+        // node; the other post-chain variables depend on them through their own edges.
+        var directPostChainVariableIdList = innerDescriptorList.stream()
+                .filter(descriptor -> Arrays.stream(descriptor.getSources())
+                        .anyMatch(source -> source.parentVariableType() == ParentVariableType.LIST_ELEMENT))
+                .<VariableMetaModel<?, ?, ?>> map(DeclarativeShadowVariableDescriptor::getVariableMetaModel)
+                .toList();
+        var blockEdgeFromList = new ArrayList<GraphNode<Solution_>>();
+        var blockEdgeToList = new ArrayList<GraphNode<Solution_>>();
+        for (var owner : ownerList) {
+            var blockNode = builder.lookupOrError(listVariableMetaModel, owner);
+            for (var preChainVariableId : elementReadVariableSet) {
+                blockEdgeFromList.add(builder.lookupOrError(preChainVariableId, owner));
+                blockEdgeToList.add(blockNode);
+            }
+            for (var postChainVariableId : directPostChainVariableIdList) {
+                blockEdgeFromList.add(blockNode);
+                blockEdgeToList.add(builder.lookupOrError(postChainVariableId, owner));
+            }
+        }
+
+        // The block edges overapproximate the per-element dependencies:
+        // when the cross-entity fact dependencies form a cycle at the entity level,
+        // the arbitrary graph only treats it as a runtime loop through the actual elements,
+        // which the solver can break, so such a model must not fail fast here.
+        var fixedEdgeGraph = new DefaultTopologicalOrderGraph(builder.nodeList.size());
+        for (var fixedEdgeEntry : builder.fixedEdges.entrySet()) {
+            for (var toNode : fixedEdgeEntry.getValue()) {
+                fixedEdgeGraph.addEdge(fixedEdgeEntry.getKey().graphNodeId(), toNode.graphNodeId());
+            }
+        }
+        var loopedChangedBitSet = new BitSet();
+        fixedEdgeGraph.commitChanges(loopedChangedBitSet);
+        if (loopedChangedBitSet.cardinality() == 0) {
+            // No genuine fixed loops; check whether the block edges would create one.
+            for (var edgeIndex = 0; edgeIndex < blockEdgeFromList.size(); edgeIndex++) {
+                fixedEdgeGraph.addEdge(blockEdgeFromList.get(edgeIndex).graphNodeId(),
+                        blockEdgeToList.get(edgeIndex).graphNodeId());
+            }
+            loopedChangedBitSet = new BitSet();
+            fixedEdgeGraph.commitChanges(loopedChangedBitSet);
+            if (loopedChangedBitSet.cardinality() != 0) {
+                LOGGER.trace(
+                        "The block node edges would form a dependency loop; falling back to the arbitrary graph.");
+                return buildArbitraryGraph(graphDescriptor);
+            }
+            for (var edgeIndex = 0; edgeIndex < blockEdgeFromList.size(); edgeIndex++) {
+                builder.addFixedEdge(blockEdgeFromList.get(edgeIndex), blockEdgeToList.get(edgeIndex));
+            }
+        }
+        // With a genuine fixed loop, the block edges are not added:
+        // build() fails fast with the standard fixed dependency loop error.
+        var innerGraph = builder.build(innerGraphDescriptor.graphCreator());
+        return new ListElementBlockVariableReferenceGraph<>(innerGraph, blockUpdater, listVariableMetaModel,
+                elementEntityClass, elementConsistencyState, elementDescriptorList, flaggingNotifier,
                 graphDescriptor.entities());
     }
 
