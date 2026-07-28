@@ -1,0 +1,315 @@
+package ai.timefold.solver.core.impl.domain.variable.declarative;
+
+import static ai.timefold.solver.core.impl.domain.variable.declarative.DeclarativeShadowVariableAssertions.solveWithFullAssert;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+
+import ai.timefold.solver.core.preview.api.move.builtin.Moves;
+import ai.timefold.solver.core.preview.api.move.test.MoveTester;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainConstraintProvider;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainSolution;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVehicle;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVisit;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataFactCycleSolution;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataFactCycleVehicle;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataFactCycleVisit;
+
+import org.junit.jupiter.api.Test;
+
+/**
+ * Tests {@link ListElementBlockVariableReferenceGraph} on a model where
+ * a vehicle starts where its predecessor vehicles end.
+ */
+class ListElementBlockShadowVariableTest {
+
+    @Test
+    void changeOnPredecessorVehiclePropagates() {
+        var x1 = new TestdataMultiEntityChainVisit("x1");
+        var x2 = new TestdataMultiEntityChainVisit("x2");
+        var x3 = new TestdataMultiEntityChainVisit("x3"); // Initially unassigned.
+        var y1 = new TestdataMultiEntityChainVisit("y1");
+        var y2 = new TestdataMultiEntityChainVisit("y2");
+
+        var vehicleA = new TestdataMultiEntityChainVehicle("A", 0);
+        var vehicleB = new TestdataMultiEntityChainVehicle("B", 0);
+        vehicleB.getPreviousVehicles().add(vehicleA);
+        vehicleA.setVisits(new ArrayList<>(List.of(x1, x2)));
+        vehicleB.setVisits(new ArrayList<>(List.of(y1, y2)));
+
+        var solution = new TestdataMultiEntityChainSolution();
+        solution.setVehicles(List.of(vehicleA, vehicleB));
+        solution.setVisits(List.of(x1, x2, x3, y1, y2));
+
+        var solutionMetaModel = TestdataMultiEntityChainSolution.buildMetaModel();
+        var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataMultiEntityChainVehicle.class)
+                .listVariable("visits", TestdataMultiEntityChainVisit.class);
+
+        var context = MoveTester.build(solutionMetaModel).using(solution);
+        // A = [1, 2], endTime 2; B starts at 2 -> [3, 4], endTime 4.
+        assertThat(vehicleA.getEndTime()).isEqualTo(2);
+        assertThat(vehicleB.getPreviousEndTime()).isEqualTo(2);
+        assertThat(y2.getEndServiceTime()).isEqualTo(4);
+        assertThat(vehicleB.getEndTime()).isEqualTo(4);
+
+        // Appending x3 to A shifts B's whole route.
+        context.execute(Moves.assign(listVariableMetaModel, x3, vehicleA, 2));
+        assertThat(x3.getEndServiceTime()).isEqualTo(3);
+        assertThat(vehicleA.getEndTime()).isEqualTo(3);
+        assertThat(vehicleB.getPreviousEndTime()).isEqualTo(3);
+        assertThat(y1.getEndServiceTime()).isEqualTo(4);
+        assertThat(y2.getEndServiceTime()).isEqualTo(5);
+        assertThat(vehicleB.getEndTime()).isEqualTo(5);
+        assertShadowsAreAtFixedPoint(solution);
+
+        // Moving x1 (head of A) to B rechains both vehicles.
+        context.execute(Moves.change(listVariableMetaModel, vehicleA, 0, vehicleB, 0));
+        assertThat(vehicleA.getEndTime()).isEqualTo(2);
+        assertThat(vehicleB.getPreviousEndTime()).isEqualTo(2);
+        assertThat(x1.getEndServiceTime()).isEqualTo(3);
+        assertThat(y2.getEndServiceTime()).isEqualTo(5);
+        assertThat(vehicleB.getEndTime()).isEqualTo(5);
+        assertShadowsAreAtFixedPoint(solution);
+    }
+
+    @Test
+    void swapCreatesNonContiguousDirtyElements() {
+        var v1 = new TestdataMultiEntityChainVisit("v1", 1);
+        var v2 = new TestdataMultiEntityChainVisit("v2", 5);
+        var v3 = new TestdataMultiEntityChainVisit("v3", 3);
+        var v4 = new TestdataMultiEntityChainVisit("v4", 2);
+        var vehicle = new TestdataMultiEntityChainVehicle("A", 0);
+        vehicle.setVisits(new ArrayList<>(List.of(v1, v2, v3, v4)));
+
+        var solution = new TestdataMultiEntityChainSolution();
+        solution.setVehicles(List.of(vehicle));
+        solution.setVisits(List.of(v1, v2, v3, v4));
+
+        var solutionMetaModel = TestdataMultiEntityChainSolution.buildMetaModel();
+        var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataMultiEntityChainVehicle.class)
+                .listVariable("visits", TestdataMultiEntityChainVisit.class);
+
+        var context = MoveTester.build(solutionMetaModel).using(solution);
+        assertThat(vehicle.getEndTime()).isEqualTo(1 + 5 + 3 + 2);
+
+        // Swap the first and third visits: the dirty elements are non-contiguous.
+        context.execute(Moves.swap(listVariableMetaModel, vehicle, 0, vehicle, 2));
+        assertThat(v3.getEndServiceTime()).isEqualTo(3);
+        assertThat(v2.getEndServiceTime()).isEqualTo(8);
+        assertThat(v1.getEndServiceTime()).isEqualTo(9);
+        assertThat(v4.getEndServiceTime()).isEqualTo(11);
+        assertThat(vehicle.getEndTime()).isEqualTo(11);
+        assertShadowsAreAtFixedPoint(solution);
+    }
+
+    /**
+     * An element in the middle of the chain reads a pre-chain variable directly,
+     * so a pre-chain change must reach it even when its predecessors are unchanged.
+     */
+    @Test
+    void preChainChangeReachesRebasingElement() {
+        var w = new TestdataMultiEntityChainVisit("w", 5, false); // Initially unassigned.
+        var v1 = new TestdataMultiEntityChainVisit("v1", 1, false);
+        var v2 = new TestdataMultiEntityChainVisit("v2", 1, true);
+        var v3 = new TestdataMultiEntityChainVisit("v3", 1, false);
+
+        var vehicleA = new TestdataMultiEntityChainVehicle("A", 0);
+        var vehicleB = new TestdataMultiEntityChainVehicle("B", 0);
+        vehicleB.getPreviousVehicles().add(vehicleA);
+        vehicleB.setVisits(new ArrayList<>(List.of(v1, v2, v3)));
+
+        var solution = new TestdataMultiEntityChainSolution();
+        solution.setVehicles(List.of(vehicleA, vehicleB));
+        solution.setVisits(List.of(w, v1, v2, v3));
+
+        var solutionMetaModel = TestdataMultiEntityChainSolution.buildMetaModel();
+        var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataMultiEntityChainVehicle.class)
+                .listVariable("visits", TestdataMultiEntityChainVisit.class);
+
+        var context = MoveTester.build(solutionMetaModel).using(solution);
+        assertThat(vehicleB.getPreviousEndTime()).isEqualTo(0);
+        assertThat(v1.getEndServiceTime()).isEqualTo(1);
+        assertThat(v2.getEndServiceTime()).isEqualTo(2);
+        assertThat(v3.getEndServiceTime()).isEqualTo(3);
+        assertThat(vehicleB.getEndTime()).isEqualTo(3);
+
+        // Assigning w to A changes B's previousEndTime;
+        // v1 does not read it and stays unchanged, but v2 re-bases on it.
+        context.execute(Moves.assign(listVariableMetaModel, w, vehicleA, 0));
+        assertThat(vehicleA.getEndTime()).isEqualTo(5);
+        assertThat(vehicleB.getPreviousEndTime()).isEqualTo(5);
+        assertThat(v1.getEndServiceTime()).isEqualTo(1);
+        assertThat(v2.getEndServiceTime()).isEqualTo(6);
+        assertThat(v3.getEndServiceTime()).isEqualTo(7);
+        assertThat(vehicleB.getEndTime()).isEqualTo(7);
+        assertShadowsAreAtFixedPoint(solution);
+    }
+
+    /**
+     * The block node edges overapproximate the per-element dependencies:
+     * when the vehicles' fact dependencies form a cycle that is not a fixed loop
+     * (endTime does not read startTime), the model falls back to the arbitrary graph,
+     * where the loop only exists through the actual elements and the solver can break it.
+     */
+    @Test
+    void cyclicVehicleFactsWithoutFixedLoopFallBack() {
+        var vehicleA = new TestdataFactCycleVehicle(
+                "A", 0);
+        var vehicleB = new TestdataFactCycleVehicle(
+                "B", 0);
+        vehicleA.setPreviousVehicle(vehicleB);
+        vehicleB.setPreviousVehicle(vehicleA);
+        var v1 = new TestdataFactCycleVisit("v1", 1);
+        var v2 = new TestdataFactCycleVisit("v2", 1);
+
+        var solution =
+                new TestdataFactCycleSolution();
+        solution.setVehicles(List.of(vehicleA, vehicleB));
+        solution.setVisits(List.of(v1, v2));
+
+        var solutionMetaModel =
+                TestdataFactCycleSolution
+                        .buildMetaModel();
+        var listVariableMetaModel = solutionMetaModel
+                .genuineEntity(
+                        TestdataFactCycleVehicle.class)
+                .listVariable("visits",
+                        TestdataFactCycleVisit.class);
+
+        // With empty routes there is no dependency loop; both vehicles are consistent.
+        var context = MoveTester.build(solutionMetaModel).using(solution);
+        assertThat(vehicleA.isInconsistent()).isFalse();
+        assertThat(vehicleB.isInconsistent()).isFalse();
+
+        // Assigning visits to both vehicles creates the loop; the solver could break it later.
+        context.execute(Moves.assign(listVariableMetaModel, v1, vehicleA, 0));
+        context.execute(Moves.assign(listVariableMetaModel, v2, vehicleB, 0));
+        assertThat(vehicleA.isInconsistent()).isTrue();
+        assertThat(vehicleB.isInconsistent()).isTrue();
+
+        // Unassigning vehicle A's visit breaks the loop again.
+        context.execute(Moves.unassign(listVariableMetaModel, vehicleA, 0));
+        assertThat(vehicleA.isInconsistent()).isFalse();
+        assertThat(vehicleB.isInconsistent()).isFalse();
+        assertThat(v2.getEndServiceTime()).isEqualTo(1);
+        assertThat(vehicleB.getEndTime()).isEqualTo(1);
+    }
+
+    @Test
+    void cyclicVehicleFactsFailFast() {
+        var vehicleA = new TestdataMultiEntityChainVehicle("A", 0);
+        var vehicleB = new TestdataMultiEntityChainVehicle("B", 0);
+        vehicleA.getPreviousVehicles().add(vehicleB);
+        vehicleB.getPreviousVehicles().add(vehicleA);
+
+        var solution = new TestdataMultiEntityChainSolution();
+        solution.setVehicles(List.of(vehicleA, vehicleB));
+        solution.setVisits(List.of(new TestdataMultiEntityChainVisit("v1")));
+
+        assertThatCode(() -> MoveTester.build(TestdataMultiEntityChainSolution.buildMetaModel()).using(solution))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("fixed dependency loops");
+    }
+
+    /**
+     * Differential test: after every random move, the incrementally maintained shadow
+     * variables must equal a from-scratch recomputation, which uses the arbitrary graph.
+     */
+    @Test
+    void randomMovesStayAtFixedPoint() {
+        for (var seed = 0; seed < 30; seed++) {
+            var random = new Random(seed);
+            var solution = generateSolution(false, true);
+            var vehicles = solution.getVehicles();
+            var visits = solution.getVisits();
+
+            var solutionMetaModel = TestdataMultiEntityChainSolution.buildMetaModel();
+            var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataMultiEntityChainVehicle.class)
+                    .listVariable("visits", TestdataMultiEntityChainVisit.class);
+            var context = MoveTester.build(solutionMetaModel).using(solution);
+
+            for (var moveIndex = 0; moveIndex < 40; moveIndex++) {
+                var unassignedVisits = visits.stream().filter(visit -> visit.getVehicle() == null).toList();
+                var assignedVehicles = vehicles.stream().filter(vehicle -> !vehicle.getVisits().isEmpty()).toList();
+                var moveType = random.nextInt(3);
+                if (moveType == 0 && !unassignedVisits.isEmpty()) {
+                    var visit = unassignedVisits.get(random.nextInt(unassignedVisits.size()));
+                    var vehicle = vehicles.get(random.nextInt(vehicles.size()));
+                    context.execute(Moves.assign(listVariableMetaModel, visit, vehicle,
+                            random.nextInt(vehicle.getVisits().size() + 1)));
+                } else if (moveType == 1 && !assignedVehicles.isEmpty()) {
+                    var vehicle = assignedVehicles.get(random.nextInt(assignedVehicles.size()));
+                    context.execute(Moves.unassign(listVariableMetaModel, vehicle,
+                            random.nextInt(vehicle.getVisits().size())));
+                } else if (!assignedVehicles.isEmpty()) {
+                    var sourceVehicle = assignedVehicles.get(random.nextInt(assignedVehicles.size()));
+                    var sourceIndex = random.nextInt(sourceVehicle.getVisits().size());
+                    var targetVehicle = vehicles.get(random.nextInt(vehicles.size()));
+                    var targetSize = targetVehicle.getVisits().size();
+                    var targetIndex = random.nextInt(targetVehicle == sourceVehicle ? targetSize : targetSize + 1);
+                    if (targetVehicle == sourceVehicle && targetIndex == sourceIndex) {
+                        continue;
+                    }
+                    context.execute(Moves.change(listVariableMetaModel, sourceVehicle, sourceIndex,
+                            targetVehicle, targetIndex));
+                } else {
+                    continue;
+                }
+                assertShadowsAreAtFixedPoint(solution);
+            }
+        }
+    }
+
+    @Test
+    void solveWithFullAssertFromUninitializedSolution() {
+        assertShadowsAreAtFixedPoint(solve(generateSolution(false, false)));
+    }
+
+    @Test
+    void solveWithFullAssertFromInitializedSolution() {
+        assertShadowsAreAtFixedPoint(solve(generateSolution(true, false)));
+    }
+
+    @Test
+    void solveWithFullAssertWithRebasingElements() {
+        assertShadowsAreAtFixedPoint(solve(generateSolution(false, true)));
+    }
+
+    private static TestdataMultiEntityChainSolution solve(TestdataMultiEntityChainSolution problem) {
+        return solveWithFullAssert(TestdataMultiEntityChainSolution.class,
+                TestdataMultiEntityChainConstraintProvider.class, problem,
+                TestdataMultiEntityChainVehicle.class, TestdataMultiEntityChainVisit.class);
+    }
+
+    private static TestdataMultiEntityChainSolution generateSolution(boolean initialized, boolean alternateRebasing) {
+        var vehicles = new ArrayList<TestdataMultiEntityChainVehicle>();
+        for (var i = 0; i < 3; i++) {
+            vehicles.add(new TestdataMultiEntityChainVehicle("vehicle" + i, i));
+        }
+        // vehicle0 -> vehicle1 -> vehicle2 chain.
+        vehicles.get(1).getPreviousVehicles().add(vehicles.get(0));
+        vehicles.get(2).getPreviousVehicles().add(vehicles.get(1));
+        var visits = new ArrayList<TestdataMultiEntityChainVisit>();
+        for (var i = 0; i < 6; i++) {
+            visits.add(new TestdataMultiEntityChainVisit("visit" + i, 1 + (i % 3),
+                    !alternateRebasing || i % 2 == 0));
+        }
+        if (initialized) {
+            vehicles.get(0).setVisits(new ArrayList<>(visits.subList(0, 4)));
+            vehicles.get(1).setVisits(new ArrayList<>(visits.subList(4, 6)));
+        }
+        var solution = new TestdataMultiEntityChainSolution();
+        solution.setVehicles(vehicles);
+        solution.setVisits(visits);
+        return solution;
+    }
+
+    private static void assertShadowsAreAtFixedPoint(TestdataMultiEntityChainSolution solution) {
+        DeclarativeShadowVariableAssertions.assertShadowsAreAtFixedPoint(solution,
+                s -> s.getVehicles().stream().map(TestdataMultiEntityChainVehicle::getEndTime).toList(),
+                s -> s.getVisits().stream().map(TestdataMultiEntityChainVisit::getEndServiceTime).toList());
+    }
+}
