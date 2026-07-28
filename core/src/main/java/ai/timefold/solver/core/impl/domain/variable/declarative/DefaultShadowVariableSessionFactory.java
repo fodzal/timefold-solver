@@ -1,5 +1,6 @@
 package ai.timefold.solver.core.impl.domain.variable.declarative;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
@@ -181,6 +182,14 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 }
                 yield buildSingleDirectionalParentGraph(graphDescriptor, graphStructureAndDirection);
             }
+            case MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT -> {
+                var scoreDirector =
+                        graphDescriptor.variableReferenceGraphBuilder().changedVariableNotifier.innerScoreDirector();
+                if (scoreDirector == null) {
+                    yield buildArbitraryGraph(graphDescriptor);
+                }
+                yield buildMultiEntitySingleDirectionalParentGraph(graphDescriptor, graphStructureAndDirection);
+            }
             case ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE ->
                 buildArbitrarySingleEntityGraph(graphDescriptor);
             case NO_DYNAMIC_EDGES, ARBITRARY ->
@@ -205,6 +214,182 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 topologicalSorter, graphDescriptor.changedVariableNotifier(),
                 canTerminateEarly,
                 graphDescriptor.entities());
+    }
+
+    static <Solution_> VariableReferenceGraph buildMultiEntitySingleDirectionalParentGraph(
+            GraphDescriptor<Solution_> graphDescriptor,
+            GraphStructure.GraphStructureAndDirection graphStructureAndDirection) {
+        var declarativeShadowVariables = graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors();
+        var sortedDeclarativeVariables = topologicallySortedDeclarativeShadowVariables(declarativeShadowVariables);
+        var chainedEntityClass = Objects.requireNonNull(graphStructureAndDirection.parentMetaModel())
+                .entity().type();
+
+        var chainedDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
+        var preChainFixedDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
+        var postChainFixedDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
+        var postChainVariableSet = GraphStructure.computePostChainVariables(declarativeShadowVariables, chainedEntityClass);
+        for (var descriptor : sortedDeclarativeVariables) {
+            if (chainedEntityClass.isAssignableFrom(descriptor.getEntityDescriptor().getEntityClass())) {
+                chainedDescriptorList.add(descriptor);
+            } else if (postChainVariableSet.contains(descriptor.getVariableMetaModel())) {
+                postChainFixedDescriptorList.add(descriptor);
+            } else {
+                preChainFixedDescriptorList.add(descriptor);
+            }
+        }
+        if (preChainFixedDescriptorList.isEmpty() && postChainFixedDescriptorList.isEmpty()) {
+            return buildSingleDirectionalParentGraph(graphDescriptor, graphStructureAndDirection);
+        }
+
+        var fixedEntityClass = (preChainFixedDescriptorList.isEmpty() ? postChainFixedDescriptorList
+                : preChainFixedDescriptorList).get(0).getEntityDescriptor().getEntityClass();
+        var entities = graphDescriptor.entities();
+
+        // Assign block node ids per fixed entity:
+        // an optional pre-chain node, a chain node and an optional post-chain node.
+        var hasPreChainNode = !preChainFixedDescriptorList.isEmpty();
+        var hasPostChainNode = !postChainFixedDescriptorList.isEmpty();
+        var fixedEntityToBlockNodes =
+                new IdentityHashMap<Object, MultiEntitySingleDirectionalParentVariableReferenceGraph.BlockNodes>();
+        var nodeCount = 0;
+        for (var entity : entities) {
+            if (fixedEntityClass.isInstance(entity)) {
+                var preChainNodeId = hasPreChainNode ? nodeCount++ : -1;
+                var chainNodeId = nodeCount++;
+                var postChainNodeId = hasPostChainNode ? nodeCount++ : -1;
+                fixedEntityToBlockNodes.put(entity,
+                        new MultiEntitySingleDirectionalParentVariableReferenceGraph.BlockNodes(entity, preChainNodeId,
+                                chainNodeId, postChainNodeId));
+            }
+        }
+        var nodeIdToBlockNodes = new MultiEntitySingleDirectionalParentVariableReferenceGraph.BlockNodes[nodeCount];
+        var nodeSuccessorSetList = new ArrayList<LinkedHashSet<Integer>>(nodeCount);
+        for (var nodeId = 0; nodeId < nodeCount; nodeId++) {
+            nodeSuccessorSetList.add(new LinkedHashSet<>());
+        }
+        var chainReadsPreChainVariable = chainedDescriptorList.stream()
+                .flatMap(descriptor -> Arrays.stream(descriptor.getSources()))
+                .anyMatch(source -> source.parentVariableType() == ParentVariableType.INVERSE);
+        for (var blockNodes : fixedEntityToBlockNodes.values()) {
+            for (var nodeId : new int[] { blockNodes.preChainNodeId(), blockNodes.chainNodeId(),
+                    blockNodes.postChainNodeId() }) {
+                if (nodeId >= 0) {
+                    nodeIdToBlockNodes[nodeId] = blockNodes;
+                }
+            }
+            // Structural edges within the entity: the chain reads pre-chain variables
+            // through the elements' inverse, and post-chain variables read the chain's elements.
+            if (hasPreChainNode && chainReadsPreChainVariable) {
+                nodeSuccessorSetList.get(blockNodes.preChainNodeId()).add(blockNodes.chainNodeId());
+            }
+            if (hasPostChainNode) {
+                nodeSuccessorSetList.get(blockNodes.chainNodeId()).add(blockNodes.postChainNodeId());
+            }
+        }
+
+        // Cross-entity and self edges from the fixed entities' declarative sources,
+        // whose fact paths cannot change during solving.
+        for (var descriptorList : List.of(preChainFixedDescriptorList, postChainFixedDescriptorList)) {
+            for (var descriptor : descriptorList) {
+                var isTargetPostChain = postChainVariableSet.contains(descriptor.getVariableMetaModel());
+                for (var source : descriptor.getSources()) {
+                    var parentVariableType = source.parentVariableType();
+                    if (parentVariableType != ParentVariableType.NO_PARENT
+                            && parentVariableType != ParentVariableType.GROUP
+                            && parentVariableType != ParentVariableType.INDIRECT) {
+                        // List element sources are covered by the chain to post-chain structural edge.
+                        continue;
+                    }
+                    var reference = source.variableSourceReferences().get(0);
+                    if (!reference.isDeclarative()) {
+                        // A non-declarative source is not produced by any block node;
+                        // its changes mark the reading entity dirty through change events instead.
+                        continue;
+                    }
+                    var isSourcePostChain = postChainVariableSet.contains(reference.variableMetaModel());
+                    for (var blockNodes : fixedEntityToBlockNodes.values()) {
+                        var toNodeId = isTargetPostChain ? blockNodes.postChainNodeId() : blockNodes.preChainNodeId();
+                        source.valueEntityFunction().accept(blockNodes.fixedEntity(), sourceEntity -> {
+                            var sourceBlockNodes = fixedEntityToBlockNodes.get(sourceEntity);
+                            if (sourceBlockNodes == null) {
+                                return;
+                            }
+                            var fromNodeId = isSourcePostChain ? sourceBlockNodes.postChainNodeId()
+                                    : sourceBlockNodes.preChainNodeId();
+                            if (fromNodeId != toNodeId) {
+                                nodeSuccessorSetList.get(fromNodeId).add(toNodeId);
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+        // Kahn's algorithm; a leftover node means the block graph has a cycle,
+        // which this graph cannot break, so fall back to the arbitrary graph.
+        var nodeInDegrees = new int[nodeCount];
+        for (var successorSet : nodeSuccessorSetList) {
+            for (var successor : successorSet) {
+                nodeInDegrees[successor]++;
+            }
+        }
+        var nodeTopologicalOrderArray = new int[nodeCount];
+        var nodeQueue = new ArrayDeque<Integer>();
+        for (var nodeId = 0; nodeId < nodeCount; nodeId++) {
+            if (nodeInDegrees[nodeId] == 0) {
+                nodeQueue.add(nodeId);
+            }
+        }
+        var order = 0;
+        while (!nodeQueue.isEmpty()) {
+            var nodeId = nodeQueue.poll();
+            nodeTopologicalOrderArray[nodeId] = order++;
+            for (var successor : nodeSuccessorSetList.get(nodeId)) {
+                if (--nodeInDegrees[successor] == 0) {
+                    nodeQueue.add(successor);
+                }
+            }
+        }
+        if (order != nodeCount) {
+            return buildArbitraryGraph(graphDescriptor);
+        }
+        var nodeSuccessorArrays = new int[nodeCount][];
+        for (var nodeId = 0; nodeId < nodeCount; nodeId++) {
+            nodeSuccessorArrays[nodeId] = nodeSuccessorSetList.get(nodeId).stream()
+                    .mapToInt(Integer::intValue)
+                    .toArray();
+        }
+        var blockGraph = new MultiEntitySingleDirectionalParentVariableReferenceGraph.BlockGraph(
+                fixedEntityToBlockNodes, nodeIdToBlockNodes, nodeTopologicalOrderArray, nodeSuccessorArrays);
+
+        var listVariableDescriptor =
+                Objects.requireNonNull(graphDescriptor.solutionDescriptor().getListVariableDescriptor());
+        // The topologically first chain element is the list's first element for a previous parent,
+        // but the list's last element for a next parent, whose successor function walks backwards.
+        var isPreviousDirection = graphStructureAndDirection.direction() == ParentVariableType.PREVIOUS;
+        Function<Object, @Nullable Object> fixedEntityToFirstChainedEntity = fixedEntity -> {
+            var elementList = listVariableDescriptor.getValue(fixedEntity);
+            if (elementList.isEmpty()) {
+                return null;
+            }
+            return isPreviousDirection ? elementList.get(0) : elementList.get(elementList.size() - 1);
+        };
+        var topologicalSorter = getTopologicalSorter(graphDescriptor.solutionDescriptor(),
+                Objects.requireNonNull(graphDescriptor.changedVariableNotifier().innerScoreDirector()),
+                Objects.requireNonNull(graphStructureAndDirection.direction()));
+        var canTerminateEarly = hasNoNonDeclarativeSourcesFromParent(declarativeShadowVariables);
+
+        return new MultiEntitySingleDirectionalParentVariableReferenceGraph<>(
+                graphDescriptor.consistencyTracker(),
+                chainedDescriptorList,
+                preChainFixedDescriptorList,
+                postChainFixedDescriptorList,
+                topologicalSorter,
+                graphDescriptor.changedVariableNotifier(),
+                canTerminateEarly,
+                fixedEntityToFirstChainedEntity,
+                blockGraph,
+                entities);
     }
 
     private static <Solution_> boolean hasNoNonDeclarativeSourcesFromParent(

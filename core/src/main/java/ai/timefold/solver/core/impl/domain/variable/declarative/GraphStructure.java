@@ -1,7 +1,9 @@
 package ai.timefold.solver.core.impl.domain.variable.declarative;
 
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import ai.timefold.solver.core.impl.domain.solution.descriptor.SolutionDescriptor;
 import ai.timefold.solver.core.impl.util.MutableInt;
@@ -36,6 +38,21 @@ public enum GraphStructure {
      * cannot be inconsistent.
      */
     SINGLE_DIRECTIONAL_PARENT,
+
+    /**
+     * A graph structure with exactly two declarative entity classes:
+     * a chained class whose only directional parent is previous or next,
+     * and a fixed class that owns the planning list variable and depends on
+     * the chained class only through the list variable's own elements.
+     * Fixed entities may depend on each other's declarative variables through
+     * fact paths (a single fact or a fact collection), which form a static
+     * block graph that is topologically sorted once at construction;
+     * each chained entity is processed by walking its chain.
+     * Since fact relations do not change during solving, no dynamic edges are needed,
+     * and a cyclic block graph is detected at construction, falling back to {@link #ARBITRARY}.
+     * Such a graph cannot be inconsistent.
+     */
+    MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT,
 
     /**
      * A graph structure that accepts all graphs that only have a single
@@ -81,6 +98,7 @@ public enum GraphStructure {
                 .toList();
         ParentVariableType directionalType = null;
         VariableMetaModel<?, ?, ?> parentMetaModel = null;
+        Class<?> directionalEntityClass = null;
         var isArbitrary = multipleDeclarativeEntityClasses;
         for (var variableSource : rootVariableSources) {
             var parentVariableType = variableSource.parentVariableType();
@@ -114,6 +132,7 @@ public enum GraphStructure {
                     if (parentMetaModel == null) {
                         parentMetaModel = variableSource.variableSourceReferences().get(0).variableMetaModel();
                         directionalType = parentVariableType;
+                        directionalEntityClass = variableSource.rootEntity();
                     } else if (!parentMetaModel.equals(variableSource.variableSourceReferences().get(0).variableMetaModel())) {
                         return new GraphStructureAndDirection(GraphStructure.ARBITRARY, null, null);
                     }
@@ -122,6 +141,14 @@ public enum GraphStructure {
                     // Do nothing
                 }
             }
+        }
+
+        // Most specific structure first; each structure has its own predicate.
+        if (directionalType != null && directionalEntityClass != null
+                && isMultiEntityDirectional(solutionDescriptor, declarativeShadowVariableDescriptors,
+                        rootVariableSources, directionalEntityClass)) {
+            return new GraphStructureAndDirection(MULTI_ENTITY_SINGLE_DIRECTIONAL_PARENT, parentMetaModel,
+                    directionalType);
         }
 
         if (isArbitrary) {
@@ -134,6 +161,174 @@ public enum GraphStructure {
             // Cannot use a single successor function if there are multiple entity classes
             return new GraphStructureAndDirection(SINGLE_DIRECTIONAL_PARENT, parentMetaModel, directionalType);
         }
+    }
+
+    /**
+     * True if the model has exactly two declarative entity classes,
+     * where the chained class only uses its chain or the fixed class's pre-chain declarative variables,
+     * and the fixed class only depends on the chained class through the list variable's own elements.
+     * The fixed class must own the planning list variable and its entities may only depend on each other
+     * through declarative variables reached from fact paths, which form a static block graph.
+     */
+    private static <Solution_> boolean isMultiEntityDirectional(
+            SolutionDescriptor<Solution_> solutionDescriptor,
+            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
+            List<RootVariableSource<?, ?>> rootVariableSources,
+            Class<?> chainedEntityClass) {
+        var declarativeEntityClassSet = new LinkedHashSet<Class<?>>();
+        for (var descriptor : declarativeShadowVariableDescriptors) {
+            declarativeEntityClassSet.add(descriptor.getEntityDescriptor().getEntityClass());
+        }
+        if (declarativeEntityClassSet.size() != 2) {
+            return false;
+        }
+        var hasAlignmentKey = declarativeShadowVariableDescriptors.stream()
+                .anyMatch(descriptor -> descriptor.getAlignmentKeyMap() != null);
+        if (hasAlignmentKey) {
+            return false;
+        }
+        Class<?> fixedEntityClass = null;
+        for (var entityClass : declarativeEntityClassSet) {
+            if (!entityClass.equals(chainedEntityClass)) {
+                fixedEntityClass = entityClass;
+            }
+        }
+        if (fixedEntityClass == null
+                || fixedEntityClass.isAssignableFrom(chainedEntityClass)
+                || chainedEntityClass.isAssignableFrom(fixedEntityClass)) {
+            // Entities are classified with instanceof, so assignable classes would misroute updaters.
+            return false;
+        }
+        var listVariableDescriptor = solutionDescriptor.getListVariableDescriptor();
+        if (listVariableDescriptor == null
+                || listVariableDescriptor.getEntityDescriptor().getEntityClass() != fixedEntityClass
+                || !chainedEntityClass.isAssignableFrom(listVariableDescriptor.getElementType())) {
+            // The graph maps each chained entity to its inverse and walks the fixed entity's list,
+            // so the fixed class must own the list variable and the chained class must cover its elements.
+            return false;
+        }
+        var postChainVariableSet = computePostChainVariables(declarativeShadowVariableDescriptors, chainedEntityClass);
+        for (var variableSource : rootVariableSources) {
+            var isChainedEntitySource = chainedEntityClass.isAssignableFrom(variableSource.rootEntity());
+            var parentVariableType = variableSource.parentVariableType();
+            if (isChainedEntitySource) {
+                switch (parentVariableType) {
+                    case PREVIOUS, NEXT -> {
+                        // Safe: stays within the chain.
+                    }
+                    case NO_PARENT -> {
+                        // Only safe when it does not access a declarative variable
+                        // through another (non-declarative) variable,
+                        // which would require dynamic edges.
+                        if (variableSource.variableSourceReferences().size() != 1) {
+                            return false;
+                        }
+                    }
+                    case INVERSE -> {
+                        // Only safe when it targets a pre-chain declarative variable of the fixed class:
+                        // post-chain variables depend on the chain itself,
+                        // and a non-declarative variable change does not trigger a chain walk.
+                        var references = variableSource.variableSourceReferences();
+                        if (references.size() < 2
+                                || !references.get(1).isDeclarative()
+                                || postChainVariableSet.contains(references.get(1).variableMetaModel())) {
+                            return false;
+                        }
+                    }
+                    default -> {
+                        return false;
+                    }
+                }
+            } else {
+                switch (parentVariableType) {
+                    case NO_PARENT -> {
+                        // Only safe when it does not access a declarative variable
+                        // through another (non-declarative) variable,
+                        // which would require dynamic edges.
+                        if (variableSource.variableSourceReferences().size() != 1) {
+                            return false;
+                        }
+                    }
+                    case GROUP, INDIRECT -> {
+                        // Only safe when the path traverses facts only and its single reference
+                        // is a declarative variable of the fixed class:
+                        // fact relations do not change during solving,
+                        // so these dependencies are the static block graph's cross-entity edges.
+                        var references = variableSource.variableSourceReferences();
+                        if (references.size() != 1) {
+                            // A second reference means the path traverses a variable,
+                            // which would require dynamic edges.
+                            return false;
+                        }
+                        var reference = references.get(0);
+                        if (!reference.isDeclarative()
+                                || chainedEntityClass.isAssignableFrom(reference.variableMetaModel().entity().type())) {
+                            return false;
+                        }
+                    }
+                    case LIST_ELEMENT -> {
+                        // Only safe when it accesses the list's own elements directly:
+                        // an entity reached through an element's fact may belong to another fixed entity,
+                        // which has no DAG edge towards this one.
+                        var reference = variableSource.variableSourceReferences().get(0);
+                        if (!reference.chainFromRootEntityToVariableEntity().isEmpty()
+                                || !chainedEntityClass.isAssignableFrom(reference.variableMetaModel().entity().type())) {
+                            return false;
+                        }
+                    }
+                    default -> {
+                        // A source reached through a genuine variable needs dynamic edges,
+                        // which the static DAG cannot represent.
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Classifies the fixed class's declarative shadow variables:
+     * a variable is post-chain when it depends on its own entity's chain,
+     * directly through a list element source or transitively through another post-chain variable
+     * of the same entity.
+     * Pre-chain variables can be computed before the entity's chain is walked;
+     * post-chain variables must be computed after it.
+     */
+    static <Solution_> Set<VariableMetaModel<?, ?, ?>> computePostChainVariables(
+            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
+            Class<?> chainedEntityClass) {
+        var fixedDescriptorList = declarativeShadowVariableDescriptors.stream()
+                .filter(descriptor -> !chainedEntityClass
+                        .isAssignableFrom(descriptor.getEntityDescriptor().getEntityClass()))
+                .toList();
+        var postChainVariableSet = new LinkedHashSet<VariableMetaModel<?, ?, ?>>();
+        var changed = true;
+        while (changed) {
+            changed = false;
+            for (var descriptor : fixedDescriptorList) {
+                var variableMetaModel = descriptor.getVariableMetaModel();
+                if (postChainVariableSet.contains(variableMetaModel)) {
+                    continue;
+                }
+                for (var source : descriptor.getSources()) {
+                    // A fact path source (group or indirect) references other fixed entities,
+                    // which the block graph's cross-entity edges already order,
+                    // so it does not propagate post-chain status.
+                    var isPostChain = source.parentVariableType() == ParentVariableType.LIST_ELEMENT
+                            || (source.parentVariableType() == ParentVariableType.NO_PARENT
+                                    && source.variableSourceReferences().stream()
+                                            .map(VariableSourceReference::variableMetaModel)
+                                            .anyMatch(postChainVariableSet::contains));
+                    if (isPostChain) {
+                        postChainVariableSet.add(variableMetaModel);
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+        return postChainVariableSet;
     }
 
     private static <Solution_> boolean doEntitiesUseDeclarativeShadowVariables(
