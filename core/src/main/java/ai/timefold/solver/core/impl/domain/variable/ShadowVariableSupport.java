@@ -19,7 +19,7 @@ import ai.timefold.solver.core.impl.domain.variable.declarative.ConsistencyTrack
 import ai.timefold.solver.core.impl.domain.variable.declarative.DeclarativeShadowVariableDescriptor;
 import ai.timefold.solver.core.impl.domain.variable.declarative.DefaultShadowVariableSession;
 import ai.timefold.solver.core.impl.domain.variable.declarative.DefaultShadowVariableSessionFactory;
-import ai.timefold.solver.core.impl.domain.variable.declarative.DefaultTopologicalOrderGraph;
+import ai.timefold.solver.core.impl.domain.variable.declarative.IncrementalTopologicalOrderGraph;
 import ai.timefold.solver.core.impl.domain.variable.declarative.ShadowVariablesInconsistentVariableDescriptor;
 import ai.timefold.solver.core.impl.domain.variable.declarative.TopologicalOrderGraph;
 import ai.timefold.solver.core.impl.domain.variable.descriptor.ListVariableDescriptor;
@@ -51,7 +51,7 @@ public final class ShadowVariableSupport<Solution_> implements SupplyManager {
     public static <Solution_> ShadowVariableSupport<Solution_> create(InnerScoreDirector<Solution_, ?> scoreDirector) {
         return new ShadowVariableSupport<>(scoreDirector,
                 TimefoldSolverEnterpriseService.loadOrDefault(service -> service::buildTopologyGraph,
-                        () -> DefaultTopologicalOrderGraph::new));
+                        () -> IncrementalTopologicalOrderGraph::new));
     }
 
     private static final int SHADOW_VARIABLE_VIOLATION_DISPLAY_LIMIT = 3;
