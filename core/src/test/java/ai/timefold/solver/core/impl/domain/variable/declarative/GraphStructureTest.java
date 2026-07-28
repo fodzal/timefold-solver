@@ -3,6 +3,7 @@ package ai.timefold.solver.core.impl.domain.variable.declarative;
 import static ai.timefold.solver.core.impl.domain.variable.declarative.GraphStructure.ARBITRARY;
 import static ai.timefold.solver.core.impl.domain.variable.declarative.GraphStructure.ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE;
 import static ai.timefold.solver.core.impl.domain.variable.declarative.GraphStructure.EMPTY;
+import static ai.timefold.solver.core.impl.domain.variable.declarative.GraphStructure.NO_DYNAMIC_EDGES;
 import static ai.timefold.solver.core.impl.domain.variable.declarative.GraphStructure.SINGLE_DIRECTIONAL_PARENT;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -130,9 +131,14 @@ class GraphStructureTest {
     void listElementStructure() {
         var entity = new TestdataListElementEntity("e1");
         var value = new TestdataListElementValue("v1");
+        // The elements are excluded from the graph and represented by per-entity block nodes;
+        // the structure describes the graph covering the remaining classes.
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataListElementSolution.buildSolutionDescriptor(), entity, value))
-                .hasFieldOrPropertyWithValue("structure", ARBITRARY);
+                .hasFieldOrPropertyWithValue("structure", NO_DYNAMIC_EDGES)
+                .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
+                .hasFieldOrPropertyWithValue("listElementBlock",
+                        new GraphStructure.ListElementBlock(TestdataListElementValue.class));
     }
 
     @Test

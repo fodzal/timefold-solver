@@ -171,6 +171,10 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
 
     static <Solution_> VariableReferenceGraph buildGraphForStructureAndDirection(
             GraphStructure.GraphStructureAndDirection graphStructureAndDirection, GraphDescriptor<Solution_> graphDescriptor) {
+        if (graphStructureAndDirection.listElementBlock() != null) {
+            // Placeholder until the block node graph lands: cover the whole model.
+            return buildArbitraryGraph(graphDescriptor);
+        }
         return switch (graphStructureAndDirection.structure()) {
             case EMPTY -> EmptyVariableReferenceGraph.INSTANCE;
             case SINGLE_DIRECTIONAL_PARENT -> {
