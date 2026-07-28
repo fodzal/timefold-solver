@@ -66,7 +66,9 @@ public final class VariableReferenceGraphBuilder<Solution_> {
                 .add(listElementSourceLocator);
     }
 
-    public <Entity_> void addVariableReferenceEntity(Entity_ entity, List<VariableUpdaterInfo<Solution_>> variableReferences) {
+    public <Entity_> void addVariableReferenceEntity(Entity_ entity,
+            List<? extends VariableUpdater<Solution_>> uncopiedVariableReferences) {
+        List<VariableUpdater<Solution_>> variableReferences = List.copyOf(uncopiedVariableReferences);
         var groupId = variableReferences.get(0).groupId();
         var isGroup = variableReferences.get(0).groupEntities() != null;
         var entityRepresentative = entity;
@@ -110,7 +112,7 @@ public final class VariableReferenceGraphBuilder<Solution_> {
     }
 
     private void addToInstanceMaps(Map<Object, GraphNode<Solution_>> instanceMap,
-            Object entity, GraphNode<Solution_> node, List<VariableUpdaterInfo<Solution_>> variableReferences) {
+            Object entity, GraphNode<Solution_> node, List<VariableUpdater<Solution_>> variableReferences) {
         instanceMap.put(entity, node);
         for (var variable : variableReferences) {
             var variableInstanceMap =
@@ -191,7 +193,7 @@ public final class VariableReferenceGraphBuilder<Solution_> {
 
         for (var cycle : nodeCycleList) {
             cycle.stream().flatMap(node -> node.variableReferences().stream())
-                    .map(VariableUpdaterInfo::id)
+                    .map(VariableUpdater::id)
                     .forEach(loopedVariables::add);
         }
 
