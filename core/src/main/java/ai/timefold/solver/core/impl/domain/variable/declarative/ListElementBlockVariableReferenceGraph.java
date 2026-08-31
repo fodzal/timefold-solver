@@ -2,6 +2,7 @@ package ai.timefold.solver.core.impl.domain.variable.declarative;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import ai.timefold.solver.core.preview.api.domain.metamodel.VariableMetaModel;
@@ -30,10 +31,11 @@ public final class ListElementBlockVariableReferenceGraph<Solution_> implements 
     private final VariableReferenceGraph innerGraph;
     private final @Nullable AbstractVariableReferenceGraph<Solution_, ?> innerNodeGraph;
     private final ListElementBlockUpdater<Solution_> blockUpdater;
-    private final VariableMetaModel<Solution_, ?, ?> listVariableMetaModel;
     private final Class<?> elementEntityClass;
     private final Set<VariableMetaModel<?, ?, ?>> monitoredSourceVariableSet;
     private final ChangedVariableNotifier<Solution_> changedVariableNotifier;
+    /** Owner to block node, hoisted out of the per-variable node map for the hot path. */
+    private final Map<Object, GraphNode<Solution_>> ownerToBlockNodeMap;
 
     private boolean isProcessing;
 
@@ -51,9 +53,10 @@ public final class ListElementBlockVariableReferenceGraph<Solution_> implements 
                 ? (AbstractVariableReferenceGraph<Solution_, ?>) abstractGraph
                 : null;
         this.blockUpdater = blockUpdater;
-        this.listVariableMetaModel = listVariableMetaModel;
         this.elementEntityClass = elementEntityClass;
         this.changedVariableNotifier = changedVariableNotifier;
+        this.ownerToBlockNodeMap = innerNodeGraph == null ? Map.of()
+                : innerNodeGraph.variableReferenceToContainingNodeMap.getOrDefault(listVariableMetaModel, Map.of());
         this.isProcessing = false;
 
         this.monitoredSourceVariableSet = new HashSet<>();
@@ -102,11 +105,8 @@ public final class ListElementBlockVariableReferenceGraph<Solution_> implements 
         if (isProcessing) {
             throw new IllegalStateException("Impossible state: list variable changed during shadow variable update.");
         }
-        // The elements in the changed range may leave the list;
-        // an element that becomes unassigned is reset when the changes are classified.
-        for (var elementIndex = fromIndex; elementIndex < toIndex; elementIndex++) {
-            blockUpdater.recordChangedElement(elementList.get(elementIndex));
-        }
+        // An element that leaves the list is recorded through its shadow variable changes
+        // (inverse and previous element), which the list variable state supply notifies.
         innerGraph.beforeListVariableChanged(variableReference, entity, elementList, fromIndex, toIndex);
     }
 
@@ -140,12 +140,13 @@ public final class ListElementBlockVariableReferenceGraph<Solution_> implements 
     }
 
     private void markBlockNodeChanged(Object owner) {
-        if (innerNodeGraph == null) {
+        var nodeGraph = innerNodeGraph;
+        if (nodeGraph == null) {
             return;
         }
-        var blockNode = innerNodeGraph.lookupOrNull(listVariableMetaModel, owner);
+        var blockNode = ownerToBlockNodeMap.get(owner);
         if (blockNode != null) {
-            innerNodeGraph.markChanged(blockNode);
+            nodeGraph.markChanged(blockNode);
         }
     }
 }

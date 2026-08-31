@@ -228,9 +228,11 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
             if (dirtyChainEnd == null || chainOrderComparator.compare(element, dirtyChainEnd) > 0) {
                 ownerToDirtyChainEnd.put(owner, element);
             }
-            dirtyOwnerConsumer.accept(owner);
         }
         changedElementList.clear();
+        for (var owner : ownerToDirtyChainStart.keySet()) {
+            dirtyOwnerConsumer.accept(owner);
+        }
         for (var owner : structuralChangeOwnerSet) {
             dirtyOwnerConsumer.accept(owner);
         }
