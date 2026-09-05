@@ -1,13 +1,10 @@
 package ai.timefold.solver.core.impl.domain.variable.declarative;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
@@ -24,22 +21,31 @@ import org.jspecify.annotations.Nullable;
  * see {@link GraphStructure.GraphStructureAndDirection#cascadedElementClass()}.
  * <p>
  * The inner graph covers everything but the elements and is built by the normal machinery.
- * The cascade walks each dirty entity's list from the earliest dirty element,
- * and marks the entity's post-chain variables changed in the inner graph when an element changed.
- * When a pre-chain variable read by the elements changes during an inner update,
- * the notifier wrapper flags its entity for a whole-chain walk.
- * {@link #updateChanged()} alternates the cascade and the inner graph until neither has work left,
- * which terminates because the flagged values converge
- * (or stop changing once the inner graph marks their entities inconsistent).
+ * The cascade walks each entity's chain from its earliest dirty element, at two moments:
+ * <ul>
+ * <li>for an entity whose list or elements changed, before the inner update;</li>
+ * <li>for an entity whose pre-chain variables changed <em>during</em> the inner update,
+ * from {@link #walkChainAfterPreChainVariableChanged(Object)}, which the notifier the inner graph
+ * was built with calls the moment such a variable is written.</li>
+ * </ul>
+ * The second moment is what keeps the cost linear in the length of a chain of entities.
+ * It relies on two invariants, which
+ * {@link DefaultShadowVariableSessionFactory#createFixedVariableRelationEdges} and
+ * {@link VariableUpdaterInfo#updateIfChanged} establish and must keep:
+ * <ol>
+ * <li>each entity's post-chain variables have an edge from the pre-chain variables its elements read,
+ * so they are computed after them, and are queued as soon as they change;</li>
+ * <li>the notifier fires after the pre-chain variable's new value has been written, and before the
+ * post-chain variables' suppliers run.</li>
+ * </ol>
+ * Together they place the walk between the two, so that a post-chain variable is never computed from
+ * a chain that is about to be re-walked. Without them, the recomputation of the post-chain variables
+ * runs ahead of the cascade down the whole chain of entities and the walks compound quadratically.
  * <p>
- * The element suppliers run once per update, since a flagged entity's walk is deferred
- * until its pre-chain variables have settled. The flagged entity's post-chain variables
- * are the one exception: the inner update that changes the pre-chain variable recomputes
- * them in the same topological pass, through their pre-chain edge and before the cascade
- * has re-walked the chain they depend on, and they are recomputed once more after the walk
- * when it changed an element. This costs one extra supplier call per flagged entity and
- * update; {@code ListElementCascadeVariableReferenceGraphTest} pins both the single element
- * computations and this residual double evaluation.
+ * Each element is therefore computed once per update, and each entity variable once,
+ * with one exception: an entity whose list changed <em>and</em> that is downstream of another change
+ * is walked twice, once before the inner update on pre-chain variables that had not settled yet,
+ * and once when they do. {@code ListElementCascadeVariableReferenceGraphTest} pins both.
  */
 @NullMarked
 public final class ListElementCascadeVariableReferenceGraph<Solution_> implements VariableReferenceGraph {
@@ -52,12 +58,6 @@ public final class ListElementCascadeVariableReferenceGraph<Solution_> implement
     private final EntityConsistencyState<Solution_, Object> elementConsistencyState;
     private final @Nullable EntityConsistencyState<Solution_, Object> ownerConsistencyState;
     private final List<VariableMetaModel<?, ?, ?>> postChainVariableIdList;
-
-    /**
-     * Filled by the wrapped notifier when a pre-chain variable read by the elements changes;
-     * see {@link DefaultShadowVariableSessionFactory#buildListElementCascadeGraph}.
-     */
-    private final Set<Object> wholeChainOwnerSet;
 
     private final UnaryOperator<@Nullable Object> nextInChain;
     private final UnaryOperator<@Nullable Object> elementToOwner;
@@ -79,7 +79,6 @@ public final class ListElementCascadeVariableReferenceGraph<Solution_> implement
             Class<?> elementEntityClass,
             @Nullable EntityConsistencyState<Solution_, Object> ownerConsistencyState,
             List<VariableMetaModel<?, ?, ?>> postChainVariableIdList,
-            Set<Object> wholeChainOwnerSet,
             TopologicalSorter topologicalSorter,
             Function<Object, @Nullable Object> ownerToFirstElement,
             boolean canTerminateEarly,
@@ -92,7 +91,6 @@ public final class ListElementCascadeVariableReferenceGraph<Solution_> implement
         this.elementEntityClass = elementEntityClass;
         this.ownerConsistencyState = ownerConsistencyState;
         this.postChainVariableIdList = postChainVariableIdList;
-        this.wholeChainOwnerSet = wholeChainOwnerSet;
         this.nextInChain = topologicalSorter.successor();
         this.elementToOwner = topologicalSorter.key();
         this.chainOrderComparator = topologicalSorter.comparator();
@@ -127,15 +125,28 @@ public final class ListElementCascadeVariableReferenceGraph<Solution_> implement
                 changedElementList.add(entity);
             }
         }
-        // The inner graph computes the pre-chain variables the first cascade reads.
-        innerGraph.updateChanged();
+    }
+
+    /**
+     * Computes every variable for the first time.
+     * Separate from the constructor, since the notifier that triggers the walks needs this graph,
+     * so it can only reach it once the constructor has returned.
+     */
+    void initialize() {
+        isProcessing = true;
+        try {
+            // The inner graph computes the pre-chain variables the first walk reads.
+            innerGraph.updateChanged();
+        } finally {
+            isProcessing = false;
+        }
         updateChanged();
     }
 
     @Override
     public void beforeVariableChanged(VariableMetaModel<?, ?, ?> variableReference, Object entity) {
         if (isProcessing) {
-            // A reentrant event of this graph's own update; the notifier wrapper already observed it.
+            // A reentrant event of this graph's own update.
             return;
         }
         innerGraph.beforeVariableChanged(variableReference, entity);
@@ -182,112 +193,77 @@ public final class ListElementCascadeVariableReferenceGraph<Solution_> implement
     public boolean updateChanged() {
         isProcessing = true;
         try {
-            // Classify the changed elements into per-owner dirty ranges;
-            // an unassigned element is reset immediately,
-            // so re-assigning it to the same position is detected as a change.
-            var ownerToDirtyChainStart = new IdentityHashMap<Object, Object>();
-            var ownerToDirtyChainEnd = new IdentityHashMap<Object, Object>();
-            for (var element : changedElementList) {
-                var owner = elementToOwner.apply(element);
-                if (owner == null) {
-                    if (!elementConsistencyState.isEntityConsistent(element)) {
-                        elementConsistencyState.setEntityIsInconsistent(changedVariableNotifier, element, false);
-                    }
-                    for (var updater : elementUpdaters) {
-                        updater.updateIfChanged(element, changedVariableNotifier);
-                    }
-                    continue;
-                }
-                var dirtyChainStart = ownerToDirtyChainStart.get(owner);
-                if (dirtyChainStart == null || chainOrderComparator.compare(element, dirtyChainStart) < 0) {
-                    ownerToDirtyChainStart.put(owner, element);
-                }
-                var dirtyChainEnd = ownerToDirtyChainEnd.get(owner);
-                if (dirtyChainEnd == null || chainOrderComparator.compare(element, dirtyChainEnd) > 0) {
-                    ownerToDirtyChainEnd.put(owner, element);
-                }
-            }
-            changedElementList.clear();
-
-            // Alternate the cascade and the inner graph until neither has work left.
-            // An owner whose pre-chain variables changed in the latest inner update is deferred
-            // while other owners still need walking: those walks may change its pre-chain
-            // variables again, and deferring keeps every element at a single computation.
-            var pendingOwnerSet = Collections.newSetFromMap(new IdentityHashMap<>());
-            pendingOwnerSet.addAll(ownerToDirtyChainStart.keySet());
-            var wholeChainSet = Collections.newSetFromMap(new IdentityHashMap<>());
-            var freshlyFlaggedOwnerList = drainWholeChainOwners();
-            pendingOwnerSet.addAll(freshlyFlaggedOwnerList);
-            wholeChainSet.addAll(freshlyFlaggedOwnerList);
-            while (true) {
-                if (!pendingOwnerSet.isEmpty()) {
-                    var deferredOwnerSet = Collections.newSetFromMap(new IdentityHashMap<>());
-                    deferredOwnerSet.addAll(freshlyFlaggedOwnerList);
-                    var walkedOwnerList = new ArrayList<>();
-                    for (var owner : pendingOwnerSet) {
-                        if (deferredOwnerSet.size() < pendingOwnerSet.size() && deferredOwnerSet.contains(owner)) {
-                            continue;
-                        }
-                        walkedOwnerList.add(owner);
-                        walkOrMarkChainInconsistent(owner,
-                                ownerToDirtyChainStart.remove(owner), ownerToDirtyChainEnd.remove(owner),
-                                wholeChainSet.contains(owner));
-                    }
-                    walkedOwnerList.forEach(pendingOwnerSet::remove);
-                }
-                if (!innerGraph.updateChanged()) {
-                    // The inner graph gave up on a structurally flawed solution and left its variables stale,
-                    // so walking the remaining chains would only spread that staleness.
-                    // Their work is put back, because the caller retries the update after undoing the move.
-                    deferPendingOwners(pendingOwnerSet, ownerToDirtyChainStart, ownerToDirtyChainEnd, wholeChainSet);
-                    return false;
-                }
-                freshlyFlaggedOwnerList = drainWholeChainOwners();
-                if (freshlyFlaggedOwnerList.isEmpty() && pendingOwnerSet.isEmpty()) {
-                    return true;
-                }
-                pendingOwnerSet.addAll(freshlyFlaggedOwnerList);
-                wholeChainSet.addAll(freshlyFlaggedOwnerList);
-            }
+            walkChainsOfChangedElements();
+            // A single inner update suffices: nothing marks a node while it is running.
+            // The walks it triggers do not have to, their post-chain variables being already queued
+            // behind their pre-chain edge, and a mark placed then would only take effect in the
+            // inner graph's next update anyway.
+            return innerGraph.updateChanged();
         } finally {
             isProcessing = false;
         }
     }
 
     /**
-     * Restores the state the classification phase of {@link #updateChanged()} consumed,
-     * so that a later update walks the chains that this one did not get to.
+     * Classifies the changed elements into per-owner dirty ranges and walks those ranges.
+     * An unassigned element is reset immediately, so that re-assigning it to the same position
+     * is detected as a change.
      */
-    private void deferPendingOwners(Set<Object> pendingOwnerSet, Map<Object, Object> ownerToDirtyChainStart,
-            Map<Object, Object> ownerToDirtyChainEnd, Set<Object> wholeChainSet) {
-        for (var owner : pendingOwnerSet) {
-            // The classification recomputes the dirty range as the extremes of the changed elements,
-            // so the bounds alone describe the same range.
+    private void walkChainsOfChangedElements() {
+        if (changedElementList.isEmpty()) {
+            return;
+        }
+        var ownerToDirtyChainStart = new IdentityHashMap<Object, Object>();
+        var ownerToDirtyChainEnd = new IdentityHashMap<Object, Object>();
+        for (var element : changedElementList) {
+            var owner = elementToOwner.apply(element);
+            if (owner == null) {
+                if (!elementConsistencyState.isEntityConsistent(element)) {
+                    elementConsistencyState.setEntityIsInconsistent(changedVariableNotifier, element, false);
+                }
+                for (var updater : elementUpdaters) {
+                    updater.updateIfChanged(element, changedVariableNotifier);
+                }
+                continue;
+            }
             var dirtyChainStart = ownerToDirtyChainStart.get(owner);
-            if (dirtyChainStart != null) {
-                changedElementList.add(dirtyChainStart);
-                changedElementList.add(Objects.requireNonNull(ownerToDirtyChainEnd.get(owner)));
+            if (dirtyChainStart == null || chainOrderComparator.compare(element, dirtyChainStart) < 0) {
+                ownerToDirtyChainStart.put(owner, element);
             }
-            if (wholeChainSet.contains(owner)) {
-                wholeChainOwnerSet.add(owner);
+            var dirtyChainEnd = ownerToDirtyChainEnd.get(owner);
+            if (dirtyChainEnd == null || chainOrderComparator.compare(element, dirtyChainEnd) > 0) {
+                ownerToDirtyChainEnd.put(owner, element);
             }
+        }
+        changedElementList.clear();
+        for (var dirtyChain : ownerToDirtyChainStart.entrySet()) {
+            var owner = dirtyChain.getKey();
+            walkOrMarkChainInconsistent(owner, dirtyChain.getValue(), ownerToDirtyChainEnd.get(owner), false);
         }
     }
 
-    private List<Object> drainWholeChainOwners() {
-        if (wholeChainOwnerSet.isEmpty()) {
-            return Collections.emptyList();
+    /**
+     * Walks the whole chain of an entity whose pre-chain variable just changed, since any of its
+     * elements may read that variable. Called from the notifier the inner graph was built with,
+     * so that the entity's post-chain variables, which the inner graph computes right after,
+     * see an up to date chain.
+     * <p>
+     * Does not mark those post-chain variables: the inner graph has already queued them,
+     * behind the edge from the pre-chain variable that changed.
+     * <p>
+     * This cannot recurse: a walk only ever writes the elements' variables, never the entity's.
+     */
+    void walkChainAfterPreChainVariableChanged(Object owner) {
+        if (isOwnerInconsistent(owner)) {
+            markChainInconsistent(owner);
+        } else {
+            walkChain(owner, null, null, true);
         }
-        var drainedOwnerList = new ArrayList<>(wholeChainOwnerSet);
-        wholeChainOwnerSet.clear();
-        return drainedOwnerList;
     }
 
     private void walkOrMarkChainInconsistent(Object owner, @Nullable Object dirtyChainStart,
             @Nullable Object dirtyChainEnd, boolean walkWholeChain) {
-        var isOwnerInconsistent = ownerConsistencyState != null
-                && Boolean.TRUE.equals(ownerConsistencyState.getEntityInconsistentValue(owner));
-        if (isOwnerInconsistent) {
+        if (isOwnerInconsistent(owner)) {
             markChainInconsistent(owner);
             return;
         }
@@ -295,6 +271,11 @@ public final class ListElementCascadeVariableReferenceGraph<Solution_> implement
         if (anyElementChanged) {
             markPostChainVariablesChanged(owner);
         }
+    }
+
+    private boolean isOwnerInconsistent(Object owner) {
+        return ownerConsistencyState != null
+                && Boolean.TRUE.equals(ownerConsistencyState.getEntityInconsistentValue(owner));
     }
 
     private boolean walkChain(Object owner, @Nullable Object dirtyChainStart, @Nullable Object dirtyChainEnd,

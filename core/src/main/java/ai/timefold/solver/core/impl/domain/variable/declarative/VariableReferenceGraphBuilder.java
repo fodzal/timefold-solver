@@ -17,6 +17,7 @@ import ai.timefold.solver.core.api.domain.variable.ShadowVariable;
 import ai.timefold.solver.core.preview.api.domain.metamodel.VariableMetaModel;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 public final class VariableReferenceGraphBuilder<Solution_> {
 
@@ -153,11 +154,19 @@ public final class VariableReferenceGraphBuilder<Solution_> {
     }
 
     public @NonNull GraphNode<Solution_> lookupOrError(VariableMetaModel<?, ?, ?> variableId, Object entity) {
-        var out = variableReferenceToContainingNodeMap.getOrDefault(variableId, Collections.emptyMap()).get(entity);
+        var out = lookupOrNull(variableId, entity);
         if (out == null) {
             throw new IllegalArgumentException();
         }
         return out;
+    }
+
+    /**
+     * As {@link #lookupOrError(VariableMetaModel, Object)}, but for a variable an extended model
+     * may declare on a subclass only, so that the entity may not have it.
+     */
+    public @Nullable GraphNode<Solution_> lookupOrNull(VariableMetaModel<?, ?, ?> variableId, Object entity) {
+        return variableReferenceToContainingNodeMap.getOrDefault(variableId, Collections.emptyMap()).get(entity);
     }
 
     private void assertNoFixedLoops() {

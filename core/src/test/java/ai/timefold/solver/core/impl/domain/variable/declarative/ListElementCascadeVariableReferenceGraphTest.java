@@ -7,10 +7,13 @@ import java.util.List;
 
 import ai.timefold.solver.core.impl.domain.variable.ListVariableStateSupply;
 import ai.timefold.solver.core.impl.score.director.InnerScoreDirector;
+import ai.timefold.solver.core.preview.api.move.builtin.Moves;
+import ai.timefold.solver.core.preview.api.move.test.MoveTester;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVisit;
 
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -19,6 +22,10 @@ import org.mockito.Mockito;
  * which is the point of {@link ListElementCascadeVariableReferenceGraph}.
  */
 class ListElementCascadeVariableReferenceGraphTest {
+
+    private static final int CHAIN_LENGTH = 6;
+    private static final int VISITS_PER_VEHICLE = 3;
+    private static final int LONG_VISIT_DURATION = 100;
 
     @Test
     void onlyReachableEntitiesAreRecomputed() {
@@ -57,12 +64,13 @@ class ListElementCascadeVariableReferenceGraphTest {
                         b2, vehicleB, a1, a3, vehicleA, b1, a2),
                 graphStructureAndDirection);
 
-        // Construction bootstraps from null values: vehicle A's chain is walked once,
-        // but vehicle B's chain is walked once before A's endTime has propagated and
-        // once after it — one extra pass per vehicle chain level, a one-off cost.
+        // Construction bootstraps from null values, so each chain is walked twice: once when its
+        // vehicle's pre-chain variables settle, and once by the classification of the elements that
+        // start out dirty. A one-off cost, and the same for every vehicle in the chain;
+        // buildingTheGraphDoesNotCompoundWalksAlongTheChain pins that it stays that way.
         // The incremental update below pins the steady-state cost.
-        assertThat(List.of(a1, a2, a3)).allMatch(visit -> visit.getCalledCount() == 1);
-        assertThat(List.of(b1, b2)).allMatch(visit -> visit.getCalledCount() == 2);
+        assertThat(List.of(a1, a2, b1, b2)).allMatch(visit -> visit.getCalledCount() == 2);
+        assertThat(a3.getCalledCount()).isOne();
         assertThat(vehicleB.getEndTime()).isEqualTo(4);
 
         vehicleA.reset();
@@ -90,10 +98,106 @@ class ListElementCascadeVariableReferenceGraphTest {
         assertThat(vehicleB.getPreviousEndTimeCalledCount()).isOne();
         assertThat(b1.getCalledCount()).isOne();
         assertThat(b2.getCalledCount()).isOne();
-        // ...except vehicle B's endTime: the inner graph recomputes it through its
-        // previousEndTime edge before the cascade re-walks B's chain, and once after.
-        assertThat(vehicleB.getEndTimeCalledCount()).isEqualTo(2);
+        // Including vehicle B's endTime: the cascade walks B's chain the moment its previousEndTime
+        // changes, so the inner graph computes the endTime after the walk rather than before and after.
+        assertThat(vehicleB.getEndTimeCalledCount()).isOne();
         assertThat(vehicleB.getEndTime()).isEqualTo(5);
+    }
+
+    @Test
+    void deepChainRecomputesEachVariableOnce() {
+        assertDeepChainRecomputesEachVariableOnce(false);
+    }
+
+    /**
+     * A vehicle's endTime that also reads its own previousEndTime changes as soon as its predecessor's
+     * endTime does, before the cascade has walked its chain. That change must not run ahead of the
+     * cascade down the whole vehicle chain, or the walks compound quadratically with the chain's length.
+     */
+    @Test
+    void deepChainRecomputesEachVariableOnceWhenTheEndTimeReadsThePreviousEndTime() {
+        assertDeepChainRecomputesEachVariableOnce(true);
+    }
+
+    private static void assertDeepChainRecomputesEachVariableOnce(boolean endTimeIncludesPreviousEndTime) {
+        var vehicleList = buildChain(endTimeIncludesPreviousEndTime);
+        var unassignedVisit = new TestdataMultiEntityChainVisit("extra", LONG_VISIT_DURATION);
+        var solution = buildSolution(vehicleList, unassignedVisit);
+
+        var solutionMetaModel = TestdataMultiEntityChainSolution.buildMetaModel();
+        var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataMultiEntityChainVehicle.class)
+                .listVariable("visits", TestdataMultiEntityChainVisit.class);
+        var context = MoveTester.build(solutionMetaModel).using(solution);
+        vehicleList.forEach(TestdataMultiEntityChainVehicle::reset);
+        solution.getVisits().forEach(TestdataMultiEntityChainVisit::reset);
+
+        // Appending a long visit to the head vehicle shifts every vehicle down the chain.
+        var headVehicle = vehicleList.getFirst();
+        context.execute(Moves.assign(listVariableMetaModel, unassignedVisit, headVehicle, VISITS_PER_VEHICLE));
+
+        // The head vehicle's earlier visits are unreachable from the insertion point.
+        assertThat(headVehicle.getVisits())
+                .allSatisfy(visit -> assertThat(visit.getCalledCount()).isEqualTo(visit == unassignedVisit ? 1 : 0));
+        // Pre-chain variables do not depend on the chain, so a chain-only change never recomputes them.
+        assertThat(headVehicle.getPreviousEndTimeCalledCount()).isZero();
+        assertThat(headVehicle.getEndTimeCalledCount()).isOne();
+        for (var vehicle : vehicleList.subList(1, CHAIN_LENGTH)) {
+            assertThat(vehicle.getVisits()).allSatisfy(visit -> assertThat(visit.getCalledCount()).isOne());
+            assertThat(vehicle.getPreviousEndTimeCalledCount()).isOne();
+            assertThat(vehicle.getEndTimeCalledCount()).isOne();
+        }
+        assertThat(vehicleList.getLast().getEndTime())
+                .isEqualTo(LONG_VISIT_DURATION + CHAIN_LENGTH * VISITS_PER_VEHICLE);
+    }
+
+    @Test
+    void buildingTheGraphDoesNotCompoundWalksAlongTheChain() {
+        var vehicleList = buildChain(true);
+        var solution = buildSolution(vehicleList, null);
+
+        MoveTester.build(TestdataMultiEntityChainSolution.buildMetaModel()).using(solution);
+
+        // Every entity is dirty when the graph is built, so a chain is walked a small constant number
+        // of times: once by the classification of the initially dirty elements, once when its vehicle's
+        // pre-chain variables settle, and once when the vehicle's consistency state is first published.
+        // What matters is that this count is the same for every vehicle: it must not grow with the
+        // number of vehicles that precede it in the chain.
+        var walksPerChain = vehicleList.getFirst().getVisits().getFirst().getCalledCount();
+        assertThat(walksPerChain).isLessThanOrEqualTo(3);
+        assertThat(solution.getVisits())
+                .allSatisfy(visit -> assertThat(visit.getCalledCount()).isEqualTo(walksPerChain));
+        assertThat(vehicleList.getLast().getEndTime()).isEqualTo(CHAIN_LENGTH * VISITS_PER_VEHICLE);
+    }
+
+    private static List<TestdataMultiEntityChainVehicle> buildChain(boolean endTimeIncludesPreviousEndTime) {
+        var vehicleList = new ArrayList<TestdataMultiEntityChainVehicle>(CHAIN_LENGTH);
+        for (var vehicleIndex = 0; vehicleIndex < CHAIN_LENGTH; vehicleIndex++) {
+            var vehicle = new TestdataMultiEntityChainVehicle("V" + vehicleIndex, 0);
+            vehicle.setEndTimeIncludesPreviousEndTime(endTimeIncludesPreviousEndTime);
+            if (vehicleIndex > 0) {
+                vehicle.setPreviousVehicles(List.of(vehicleList.get(vehicleIndex - 1)));
+            }
+            var visitList = new ArrayList<TestdataMultiEntityChainVisit>(VISITS_PER_VEHICLE);
+            for (var visitIndex = 0; visitIndex < VISITS_PER_VEHICLE; visitIndex++) {
+                visitList.add(new TestdataMultiEntityChainVisit("v%d_%d".formatted(vehicleIndex, visitIndex)));
+            }
+            vehicle.setVisits(visitList);
+            vehicleList.add(vehicle);
+        }
+        return vehicleList;
+    }
+
+    private static TestdataMultiEntityChainSolution buildSolution(List<TestdataMultiEntityChainVehicle> vehicleList,
+            @Nullable TestdataMultiEntityChainVisit unassignedVisit) {
+        var visitList = new ArrayList<TestdataMultiEntityChainVisit>();
+        vehicleList.forEach(vehicle -> visitList.addAll(vehicle.getVisits()));
+        if (unassignedVisit != null) {
+            visitList.add(unassignedVisit);
+        }
+        var solution = new TestdataMultiEntityChainSolution();
+        solution.setVehicles(vehicleList);
+        solution.setVisits(visitList);
+        return solution;
     }
 
     private static void link(

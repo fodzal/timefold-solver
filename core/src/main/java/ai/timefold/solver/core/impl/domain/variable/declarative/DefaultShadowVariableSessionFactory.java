@@ -26,6 +26,7 @@ import ai.timefold.solver.core.impl.domain.variable.descriptor.VariableDescripto
 import ai.timefold.solver.core.impl.score.director.InnerScoreDirector;
 import ai.timefold.solver.core.impl.util.CollectionUtils;
 import ai.timefold.solver.core.impl.util.MutableInt;
+import ai.timefold.solver.core.impl.util.MutableReference;
 import ai.timefold.solver.core.preview.api.domain.metamodel.VariableMetaModel;
 
 import org.jspecify.annotations.NullMarked;
@@ -246,7 +247,9 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         // when one of them changes during an update, its entity's whole list must be walked,
         // since any element may read it.
         // These variables are declarative, so they only ever change through a notifier;
-        // wrapping it observes every such change, including those of the inner graph's updates.
+        // wrapping it observes every such change, including those of the inner graph's updates,
+        // and lets the cascade walk the chain right then, before the entity's post-chain variables
+        // are computed from it.
         var elementReadVariableSet = new HashSet<VariableMetaModel<?, ?, ?>>();
         for (var descriptor : elementDescriptorList) {
             for (var source : descriptor.getSources()) {
@@ -257,27 +260,35 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 }
             }
         }
-        var wholeChainOwnerSet = Collections.newSetFromMap(new IdentityHashMap<>());
+        // The graph does not exist yet, and the notifier it is built with must call back into it.
+        var graphReference = new MutableReference<ListElementCascadeVariableReferenceGraph<Solution_>>();
         var changedVariableNotifier = graphDescriptor.changedVariableNotifier();
-        var flaggingNotifier = elementReadVariableSet.isEmpty() ? changedVariableNotifier
+        var walkingNotifier = elementReadVariableSet.isEmpty() ? changedVariableNotifier
                 : new ChangedVariableNotifier<>(
                         changedVariableNotifier.beforeVariableChanged(),
                         (variableDescriptor, entity) -> {
-                            if (elementReadVariableSet.contains(variableDescriptor.getVariableMetaModel())) {
-                                wholeChainOwnerSet.add(entity);
-                            }
                             changedVariableNotifier.afterVariableChanged().accept(variableDescriptor, entity);
+                            if (!elementReadVariableSet.contains(variableDescriptor.getVariableMetaModel())) {
+                                return;
+                            }
+                            var graph = graphReference.getValue();
+                            if (graph != null) {
+                                graph.walkChainAfterPreChainVariableChanged(entity);
+                            }
+                            // Else the inner graph is notifying while it is still being built,
+                            // before the cascade exists; its initialize() walks every chain anyway.
                         },
                         changedVariableNotifier.innerScoreDirector());
 
+        var elementCascade = new ElementCascade(elementEntityClass, List.copyOf(elementReadVariableSet));
         var innerGraphDescriptor = new GraphDescriptor<>(graphDescriptor.consistencyTracker(), solutionDescriptor,
-                graphDescriptor.ignoreInconsistentSolutions(), new VariableReferenceGraphBuilder<>(flaggingNotifier),
+                graphDescriptor.ignoreInconsistentSolutions(), new VariableReferenceGraphBuilder<>(walkingNotifier),
                 graphDescriptor.entities(), graphDescriptor.graphCreator());
         var innerGraph = switch (graphStructureAndDirection.structure()) {
             case EMPTY -> EmptyVariableReferenceGraph.INSTANCE;
             case ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE ->
-                buildArbitrarySingleEntityGraph(innerGraphDescriptor, innerDescriptorList, elementEntityClass);
-            default -> buildArbitraryGraph(innerGraphDescriptor, innerDescriptorList, elementEntityClass);
+                buildArbitrarySingleEntityGraph(innerGraphDescriptor, innerDescriptorList, elementCascade);
+            default -> buildArbitraryGraph(innerGraphDescriptor, innerDescriptorList, elementCascade);
         };
 
         var postChainVariableSet = GraphStructure.computePostChainVariables(allDescriptors, elementEntityClass);
@@ -310,19 +321,22 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 Objects.requireNonNull(graphStructureAndDirection.direction()));
         var canTerminateEarly = hasNoNonDeclarativeSourcesFromParent(elementDescriptorList);
 
-        return new ListElementCascadeVariableReferenceGraph<>(
+        var graph = new ListElementCascadeVariableReferenceGraph<>(
                 graphDescriptor.consistencyTracker(),
                 innerGraph,
                 sortedElementDescriptors,
                 elementEntityClass,
                 ownerConsistencyState,
                 postChainVariableIdList,
-                wholeChainOwnerSet,
                 topologicalSorter,
                 ownerToFirstElement,
                 canTerminateEarly,
-                flaggingNotifier,
+                walkingNotifier,
                 graphDescriptor.entities());
+        graphReference.setValue(graph);
+        // Only now that the notifier can reach the graph may an update, and with it a walk, be triggered.
+        graph.initialize();
+        return graph;
     }
 
     private static <Solution_> boolean hasNoNonDeclarativeSourcesFromParent(
@@ -398,6 +412,17 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         };
     }
 
+    /**
+     * The planning list variable's elements that {@link ListElementCascadeVariableReferenceGraph} keeps out
+     * of the graph it wraps, for the builders of that inner graph.
+     *
+     * @param elementEntityClass the elements' entity class
+     * @param preChainVariableIdList the list entity's declarative variables the elements read through their inverse
+     */
+    record ElementCascade(Class<?> elementEntityClass,
+            List<VariableMetaModel<?, ?, ?>> preChainVariableIdList) {
+    }
+
     private static <Solution_> VariableReferenceGraph buildArbitraryGraph(GraphDescriptor<Solution_> graphDescriptor) {
         return buildArbitraryGraph(graphDescriptor,
                 graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors(), null);
@@ -405,7 +430,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
 
     private static <Solution_> VariableReferenceGraph buildArbitraryGraph(GraphDescriptor<Solution_> graphDescriptor,
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
-            @Nullable Class<?> cascadedElementClass) {
+            @Nullable ElementCascade elementCascade) {
         var variableIdToUpdater = EntityVariableUpdaterLookup.<Solution_> entityIndependentLookup();
 
         // Create graph node for each entity/declarative shadow variable pair.
@@ -417,18 +442,18 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 graphDescriptor,
                 declarativeShadowVariableDescriptors, variableIdToUpdater);
         return buildVariableReferenceGraph(graphDescriptor, declarativeShadowVariableDescriptors,
-                declarativeShadowVariableToAliasMap, cascadedElementClass);
+                declarativeShadowVariableToAliasMap, elementCascade);
     }
 
     private static <Solution_> VariableReferenceGraph buildVariableReferenceGraph(
             GraphDescriptor<Solution_> graphDescriptor,
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
             Map<VariableMetaModel<?, ?, ?>, Set<VariableSourceReference>> declarativeShadowVariableToAliasMap,
-            @Nullable Class<?> cascadedElementClass) {
+            @Nullable ElementCascade elementCascade) {
         // Create variable processors for each declarative shadow variable descriptor
         for (var declarativeShadowVariable : declarativeShadowVariableDescriptors) {
             var fromVariableId = declarativeShadowVariable.getVariableMetaModel();
-            createSourceChangeProcessors(graphDescriptor, declarativeShadowVariable, fromVariableId, cascadedElementClass);
+            createSourceChangeProcessors(graphDescriptor, declarativeShadowVariable, fromVariableId, elementCascade);
             var aliasSet = declarativeShadowVariableToAliasMap.get(fromVariableId);
             if (aliasSet != null) {
                 createAliasToVariableChangeProcessors(graphDescriptor.variableReferenceGraphBuilder(), aliasSet,
@@ -438,7 +463,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
 
         // Create the fixed edges in the graph
         createFixedVariableRelationEdges(graphDescriptor.variableReferenceGraphBuilder(), graphDescriptor.entities(),
-                declarativeShadowVariableDescriptors, cascadedElementClass);
+                declarativeShadowVariableDescriptors, elementCascade);
         return graphDescriptor.variableReferenceGraphBuilder().build(graphDescriptor.graphCreator(),
                 graphDescriptor.ignoreInconsistentSolutions());
     }
@@ -583,7 +608,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
     private static <Solution_> VariableReferenceGraph buildArbitrarySingleEntityGraph(
             GraphDescriptor<Solution_> graphDescriptor,
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
-            @Nullable Class<?> cascadedElementClass) {
+            @Nullable ElementCascade elementCascade) {
         // Use a dependent lookup; if an entity does not use groups, then all variables can share the same node.
         // If the entity use groups, then variables must be grouped into their own nodes.
         var alignmentKeyMappers = new HashMap<VariableMetaModel<Solution_, ?, ?>, Function<Object, @Nullable Object>>();
@@ -613,7 +638,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 (entity, declarativeShadowVariable, variableId) -> variableIdToGroupedUpdater.get(variableId)
                         .getUpdatersForEntityVariable(entity, declarativeShadowVariable));
         return buildVariableReferenceGraph(graphDescriptor, declarativeShadowVariableDescriptors,
-                declarativeShadowVariableToAliasMap, cascadedElementClass);
+                declarativeShadowVariableToAliasMap, elementCascade);
     }
 
     private static <Solution_> Map<VariableMetaModel<?, ?, ?>, Set<VariableSourceReference>> createGraphNodes(
@@ -668,10 +693,10 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             GraphDescriptor<Solution_> graphDescriptor,
             DeclarativeShadowVariableDescriptor<Solution_> declarativeShadowVariable,
             VariableMetaModel<Solution_, ?, ?> fromVariableId,
-            @Nullable Class<?> cascadedElementClass) {
+            @Nullable ElementCascade elementCascade) {
         for (var source : declarativeShadowVariable.getSources()) {
             if (source.parentVariableType() == ParentVariableType.LIST_ELEMENT) {
-                createListElementSourceProcessors(graphDescriptor, source, fromVariableId, cascadedElementClass);
+                createListElementSourceProcessors(graphDescriptor, source, fromVariableId, elementCascade);
                 continue;
             }
             var parentVariableList = new ArrayList<VariableSourceReference>();
@@ -757,7 +782,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             GraphDescriptor<Solution_> graphDescriptor,
             RootVariableSource<?, ?> source,
             VariableMetaModel<Solution_, ?, ?> fromVariableId,
-            @Nullable Class<?> cascadedElementClass) {
+            @Nullable ElementCascade elementCascade) {
         var listVariableId = Objects.requireNonNull(source.listVariableMetaModel());
         // Mark the target variable changed whenever its list variable changes,
         // since its dependency set (and possibly its value) changes with the list's contents.
@@ -771,7 +796,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                                 graph.markChanged(changed);
                             }
                         });
-        if (cascadedElementClass != null) {
+        if (elementCascade != null) {
             // The list's elements are not part of the graph; the element cascade marks the
             // target variable changed when an element changes, so no edges are needed,
             // and the graph stays fixed if nothing else needs dynamic edges.
@@ -841,7 +866,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             VariableReferenceGraphBuilder<Solution_> variableReferenceGraphBuilder,
             Object[] entities,
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
-            @Nullable Class<?> cascadedElementClass) {
+            @Nullable ElementCascade elementCascade) {
         for (var entity : entities) {
             for (var declarativeShadowVariableDescriptor : declarativeShadowVariableDescriptors) {
                 var entityClass = declarativeShadowVariableDescriptor.getEntityDescriptor().getEntityClass();
@@ -858,9 +883,20 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                             // the graph is built and are removed/added as it changes during solving,
                             // so they must not be treated as fixed by the fixed-loop fail-fast.
                             var isListElementSource = sourceRoot.parentVariableType() == ParentVariableType.LIST_ELEMENT;
-                            if (isListElementSource && cascadedElementClass != null) {
-                                // The list's elements are not part of the graph;
-                                // the element cascade covers this source without edges.
+                            if (isListElementSource && elementCascade != null) {
+                                // The list's elements are not part of the graph, so this source has no edges.
+                                // The elements read the entity's pre-chain variables, so the target variable
+                                // transitively depends on them; carry that dependency as a direct edge.
+                                // It orders the target variable after the pre-chain variables, which is what
+                                // lets the cascade walk the chain in between; see
+                                // ListElementCascadeVariableReferenceGraph#walkChainAfterPreChainVariableChanged.
+                                for (var preChainVariableId : elementCascade.preChainVariableIdList()) {
+                                    var preChainNode = variableReferenceGraphBuilder.lookupOrNull(preChainVariableId,
+                                            entity);
+                                    if (preChainNode != null) {
+                                        variableReferenceGraphBuilder.addFixedEdge(preChainNode, to);
+                                    }
+                                }
                                 break;
                             }
                             sourceRoot.valueEntityFunction()
