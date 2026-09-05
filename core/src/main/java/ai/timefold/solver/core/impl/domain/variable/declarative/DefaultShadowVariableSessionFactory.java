@@ -78,23 +78,30 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
 
     public record GraphDescriptor<Solution_>(ConsistencyTracker<Solution_> consistencyTracker,
             SolutionDescriptor<Solution_> solutionDescriptor,
+            boolean ignoreInconsistentSolutions,
             VariableReferenceGraphBuilder<Solution_> variableReferenceGraphBuilder,
             Object[] entities, IntFunction<TopologicalOrderGraph> graphCreator) {
 
         public GraphDescriptor(SolutionDescriptor<Solution_> solutionDescriptor,
                 ChangedVariableNotifier<Solution_> changedVariableNotifier,
                 Object... entities) {
-            this(new ConsistencyTracker<>(), solutionDescriptor, new VariableReferenceGraphBuilder<>(changedVariableNotifier),
+            this(new ConsistencyTracker<>(), solutionDescriptor, !solutionDescriptor.hasAnyShadowVariablesInconsistentMember(),
+                    new VariableReferenceGraphBuilder<>(changedVariableNotifier),
                     entities, DefaultTopologicalOrderGraph::new);
         }
 
         public GraphDescriptor<Solution_> withGraphCreator(IntFunction<TopologicalOrderGraph> graphCreator) {
-            return new GraphDescriptor<>(consistencyTracker, solutionDescriptor,
+            return new GraphDescriptor<>(consistencyTracker, solutionDescriptor, ignoreInconsistentSolutions,
                     variableReferenceGraphBuilder, entities, graphCreator);
         }
 
         public GraphDescriptor<Solution_> withConsistencyTracker(ConsistencyTracker<Solution_> consistencyTracker) {
-            return new GraphDescriptor<>(consistencyTracker, solutionDescriptor,
+            return new GraphDescriptor<>(consistencyTracker, solutionDescriptor, ignoreInconsistentSolutions,
+                    variableReferenceGraphBuilder, entities, graphCreator);
+        }
+
+        public GraphDescriptor<Solution_> withIgnoreInconsistentSolutions(boolean ignoreInconsistentSolutions) {
+            return new GraphDescriptor<>(consistencyTracker, solutionDescriptor, ignoreInconsistentSolutions,
                     variableReferenceGraphBuilder, entities, graphCreator);
         }
 
@@ -265,8 +272,8 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                         changedVariableNotifier.innerScoreDirector());
 
         var innerGraphDescriptor = new GraphDescriptor<>(graphDescriptor.consistencyTracker(), solutionDescriptor,
-                new VariableReferenceGraphBuilder<>(flaggingNotifier), graphDescriptor.entities(),
-                graphDescriptor.graphCreator());
+                graphDescriptor.ignoreInconsistentSolutions(), new VariableReferenceGraphBuilder<>(flaggingNotifier),
+                graphDescriptor.entities(), graphDescriptor.graphCreator());
         // Per-variable nodes for the non-element classes, whatever their structure:
         // grouped single-entity nodes could put a pre-chain variable in a node ordered
         // after the block node, breaking the pre-chain before block node guarantee.
@@ -368,7 +375,8 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         }
         // With a genuine fixed loop, the block edges are not added:
         // build() fails fast with the standard fixed dependency loop error.
-        var innerGraph = builder.build(innerGraphDescriptor.graphCreator());
+        var innerGraph = builder.build(innerGraphDescriptor.graphCreator(),
+                innerGraphDescriptor.ignoreInconsistentSolutions());
         return new ListElementBlockVariableReferenceGraph<>(innerGraph, blockUpdater, listVariableMetaModel,
                 elementEntityClass, elementConsistencyState, elementDescriptorList, flaggingNotifier,
                 graphDescriptor.entities());
@@ -456,7 +464,8 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
             @Nullable Class<?> excludedElementClass) {
         populateArbitraryGraph(graphDescriptor, declarativeShadowVariableDescriptors, excludedElementClass);
-        return graphDescriptor.variableReferenceGraphBuilder().build(graphDescriptor.graphCreator());
+        return graphDescriptor.variableReferenceGraphBuilder().build(graphDescriptor.graphCreator(),
+                graphDescriptor.ignoreInconsistentSolutions());
     }
 
     private static <Solution_> void populateArbitraryGraph(GraphDescriptor<Solution_> graphDescriptor,
@@ -632,7 +641,8 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             GraphDescriptor<Solution_> graphDescriptor) {
         populateArbitrarySingleEntityGraph(graphDescriptor,
                 graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors(), null);
-        return graphDescriptor.variableReferenceGraphBuilder().build(graphDescriptor.graphCreator());
+        return graphDescriptor.variableReferenceGraphBuilder().build(graphDescriptor.graphCreator(),
+                graphDescriptor.ignoreInconsistentSolutions());
     }
 
     private static <Solution_> void populateArbitrarySingleEntityGraph(
@@ -936,18 +946,21 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
     }
 
     public DefaultShadowVariableSession<Solution_> forSolution(ConsistencyTracker<Solution_> consistencyTracker,
-            Solution_ solution) {
+            Solution_ solution,
+            boolean ignoreInconsistentSolutions) {
         var entities = new ArrayList<>();
         solutionDescriptor.visitAllEntities(solution, entities::add);
-        return forEntities(consistencyTracker, entities.toArray());
+        return forEntities(consistencyTracker, ignoreInconsistentSolutions, entities.toArray());
     }
 
     public DefaultShadowVariableSession<Solution_> forEntities(ConsistencyTracker<Solution_> consistencyTracker,
+            boolean ignoreInconsistentSolutions,
             Object... entities) {
         var graph = buildGraph(
                 new GraphDescriptor<>(solutionDescriptor, ChangedVariableNotifier.of(scoreDirector), entities)
                         .withConsistencyTracker(consistencyTracker)
-                        .withGraphCreator(graphCreator));
+                        .withGraphCreator(graphCreator)
+                        .withIgnoreInconsistentSolutions(ignoreInconsistentSolutions));
         return new DefaultShadowVariableSession<>(graph);
     }
 }

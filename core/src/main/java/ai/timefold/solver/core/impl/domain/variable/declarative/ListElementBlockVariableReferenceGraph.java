@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import ai.timefold.solver.core.api.score.analysis.VariableLoop;
 import ai.timefold.solver.core.preview.api.domain.metamodel.VariableMetaModel;
 
 import org.jspecify.annotations.NullMarked;
@@ -126,17 +127,30 @@ public final class ListElementBlockVariableReferenceGraph<Solution_> implements 
     }
 
     @Override
-    public void updateChanged() {
+    public boolean updateChanged() {
         isProcessing = true;
         try {
             blockUpdater.classifyChangedElements(changedVariableNotifier, this::markBlockNodeChanged);
-            innerGraph.updateChanged();
+            if (!innerGraph.updateChanged()) {
+                // The graph gave up on a structurally flawed solution, leaving block nodes unprocessed.
+                // Their dirty ranges are kept, because the caller undoes the move and updates again;
+                // clearing them would leave the chains that were not walked with stale values.
+                return false;
+            }
             // A flag whose block node was never processed (e.g. its entity is no longer
             // in the working solution) must not leak into the next update.
             blockUpdater.clearTransientState();
+            return true;
         } finally {
             isProcessing = false;
         }
+    }
+
+    @Override
+    public List<VariableLoop> getVariableLoops() {
+        // A loop that closes through a chain runs through the entity's block node,
+        // which the graph reports as its list variable; its elements follow their entity.
+        return innerGraph.getVariableLoops();
     }
 
     private void markBlockNodeChanged(Object owner) {
