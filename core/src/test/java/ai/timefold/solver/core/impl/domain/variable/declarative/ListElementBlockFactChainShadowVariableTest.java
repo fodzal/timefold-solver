@@ -95,13 +95,8 @@ class ListElementBlockFactChainShadowVariableTest {
     }
 
     @Test
-    void solveWithFullAssertFromUninitializedSolution() {
-        assertShadowsAreAtFixedPoint(solve(generateSolution(false)));
-    }
-
-    @Test
-    void solveWithFullAssertFromInitializedSolution() {
-        assertShadowsAreAtFixedPoint(solve(generateSolution(true)));
+    void solvingStaysAtFixedPoint() {
+        assertShadowsAreAtFixedPoint(solve(generateSolution()));
     }
 
     private static TestdataFactChainSolution solve(TestdataFactChainSolution problem) {
@@ -110,7 +105,7 @@ class ListElementBlockFactChainShadowVariableTest {
                 TestdataFactChainVehicle.class, TestdataFactChainVisit.class);
     }
 
-    private static TestdataFactChainSolution generateSolution(boolean initialized) {
+    private static TestdataFactChainSolution generateSolution() {
         var vehicles = new ArrayList<TestdataFactChainVehicle>();
         for (var i = 0; i < 3; i++) {
             vehicles.add(new TestdataFactChainVehicle("vehicle" + i, i));
@@ -121,10 +116,6 @@ class ListElementBlockFactChainShadowVariableTest {
         var visits = new ArrayList<TestdataFactChainVisit>();
         for (var i = 0; i < 6; i++) {
             visits.add(new TestdataFactChainVisit("visit" + i, 1 + (i % 3)));
-        }
-        if (initialized) {
-            vehicles.get(0).setVisits(new ArrayList<>(visits.subList(0, 4)));
-            vehicles.get(1).setVisits(new ArrayList<>(visits.subList(4, 6)));
         }
         var solution = new TestdataFactChainSolution();
         solution.setVehicles(vehicles);

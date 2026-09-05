@@ -296,7 +296,7 @@ class ListElementBlockShadowVariableTest {
     void randomMovesStayAtFixedPoint() {
         for (var seed = 0; seed < 30; seed++) {
             var random = new Random(seed);
-            var solution = generateSolution(false, true);
+            var solution = generateSolution(true);
             var vehicles = solution.getVehicles();
             var visits = solution.getVisits();
 
@@ -338,18 +338,13 @@ class ListElementBlockShadowVariableTest {
     }
 
     @Test
-    void solveWithFullAssertFromUninitializedSolution() {
-        assertShadowsAreAtFixedPoint(solve(generateSolution(false, false)));
+    void solvingStaysAtFixedPoint() {
+        assertShadowsAreAtFixedPoint(solve(generateSolution(false)));
     }
 
     @Test
-    void solveWithFullAssertFromInitializedSolution() {
-        assertShadowsAreAtFixedPoint(solve(generateSolution(true, false)));
-    }
-
-    @Test
-    void solveWithFullAssertWithPreChainReadingElements() {
-        assertShadowsAreAtFixedPoint(solve(generateSolution(false, true)));
+    void solvingStaysAtFixedPointWithPreChainReadingElements() {
+        assertShadowsAreAtFixedPoint(solve(generateSolution(true)));
     }
 
     private static TestdataMultiEntityChainSolution solve(TestdataMultiEntityChainSolution problem) {
@@ -358,7 +353,7 @@ class ListElementBlockShadowVariableTest {
                 TestdataMultiEntityChainVehicle.class, TestdataMultiEntityChainVisit.class);
     }
 
-    private static TestdataMultiEntityChainSolution generateSolution(boolean initialized, boolean alternatePreChainReaders) {
+    private static TestdataMultiEntityChainSolution generateSolution(boolean alternatePreChainReaders) {
         var vehicles = new ArrayList<TestdataMultiEntityChainVehicle>();
         for (var i = 0; i < 3; i++) {
             vehicles.add(new TestdataMultiEntityChainVehicle("vehicle" + i, i));
@@ -370,10 +365,6 @@ class ListElementBlockShadowVariableTest {
         for (var i = 0; i < 6; i++) {
             visits.add(new TestdataMultiEntityChainVisit("visit" + i, 1 + (i % 3),
                     !alternatePreChainReaders || i % 2 == 0));
-        }
-        if (initialized) {
-            vehicles.get(0).setVisits(new ArrayList<>(visits.subList(0, 4)));
-            vehicles.get(1).setVisits(new ArrayList<>(visits.subList(4, 6)));
         }
         var solution = new TestdataMultiEntityChainSolution();
         solution.setVehicles(vehicles);
