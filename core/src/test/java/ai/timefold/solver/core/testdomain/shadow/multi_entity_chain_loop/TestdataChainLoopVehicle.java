@@ -1,27 +1,31 @@
-package ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fact;
+package ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_loop;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import ai.timefold.solver.core.api.domain.entity.PlanningEntity;
 import ai.timefold.solver.core.api.domain.variable.PlanningListVariable;
+import ai.timefold.solver.core.api.domain.variable.PlanningVariable;
 import ai.timefold.solver.core.api.domain.variable.ShadowSources;
 import ai.timefold.solver.core.api.domain.variable.ShadowVariable;
+import ai.timefold.solver.core.api.domain.variable.ShadowVariablesInconsistent;
 import ai.timefold.solver.core.testdomain.TestdataObject;
 
 /**
- * A vehicle that starts where its single predecessor vehicle ends,
- * linked by a plain fact instead of a fact collection,
- * so a change on the predecessor's route propagates through a fact path.
+ * A vehicle that starts where its predecessor ends, where the predecessor is a planning variable
+ * instead of a fact. The solver can therefore chain two vehicles to each other, which is a
+ * dependency loop it can break again; a loop between facts would fail fast at build time instead.
  */
 @PlanningEntity
-public class TestdataFactChainVehicle extends TestdataObject {
+public class TestdataChainLoopVehicle extends TestdataObject {
 
-    TestdataFactChainVehicle previousVehicle;
+    @PlanningVariable(allowsUnassigned = true)
+    TestdataChainLoopVehicle previousVehicle;
+
     int departureTime;
 
     @PlanningListVariable(allowsUnassignedValues = true)
-    List<TestdataFactChainVisit> visits = new ArrayList<>();
+    List<TestdataChainLoopVisit> visits = new ArrayList<>();
 
     @ShadowVariable(supplierName = "startTimeSupplier")
     Integer startTime;
@@ -29,43 +33,38 @@ public class TestdataFactChainVehicle extends TestdataObject {
     @ShadowVariable(supplierName = "endTimeSupplier")
     Integer endTime;
 
-    int startTimeCalledCount = 0;
-    int endTimeCalledCount = 0;
+    @ShadowVariablesInconsistent
+    Boolean inconsistent;
 
-    public TestdataFactChainVehicle() {
+    public TestdataChainLoopVehicle() {
     }
 
-    public TestdataFactChainVehicle(String code, int departureTime) {
+    public TestdataChainLoopVehicle(String code, int departureTime) {
         super(code);
         this.departureTime = departureTime;
     }
 
-    @ShadowSources("previousVehicle.endTime")
+    @ShadowSources({ "previousVehicle", "previousVehicle.endTime" })
     public Integer startTimeSupplier() {
-        startTimeCalledCount++;
         if (previousVehicle == null) {
             return departureTime;
         }
-        if (previousVehicle.getEndTime() == null) {
-            return null;
-        }
-        return Math.max(departureTime, previousVehicle.getEndTime());
+        return previousVehicle.getEndTime();
     }
 
     @ShadowSources({ "visits[].endServiceTime", "startTime" })
     public Integer endTimeSupplier() {
-        endTimeCalledCount++;
         if (visits.isEmpty()) {
             return startTime;
         }
         return visits.getLast().getEndServiceTime();
     }
 
-    public TestdataFactChainVehicle getPreviousVehicle() {
+    public TestdataChainLoopVehicle getPreviousVehicle() {
         return previousVehicle;
     }
 
-    public void setPreviousVehicle(TestdataFactChainVehicle previousVehicle) {
+    public void setPreviousVehicle(TestdataChainLoopVehicle previousVehicle) {
         this.previousVehicle = previousVehicle;
     }
 
@@ -73,15 +72,11 @@ public class TestdataFactChainVehicle extends TestdataObject {
         return departureTime;
     }
 
-    public void setDepartureTime(int departureTime) {
-        this.departureTime = departureTime;
-    }
-
-    public List<TestdataFactChainVisit> getVisits() {
+    public List<TestdataChainLoopVisit> getVisits() {
         return visits;
     }
 
-    public void setVisits(List<TestdataFactChainVisit> visits) {
+    public void setVisits(List<TestdataChainLoopVisit> visits) {
         this.visits = visits;
     }
 
@@ -101,16 +96,11 @@ public class TestdataFactChainVehicle extends TestdataObject {
         this.endTime = endTime;
     }
 
-    public int getStartTimeCalledCount() {
-        return startTimeCalledCount;
+    public Boolean getInconsistent() {
+        return inconsistent;
     }
 
-    public int getEndTimeCalledCount() {
-        return endTimeCalledCount;
-    }
-
-    public void reset() {
-        startTimeCalledCount = 0;
-        endTimeCalledCount = 0;
+    public void setInconsistent(Boolean inconsistent) {
+        this.inconsistent = inconsistent;
     }
 }

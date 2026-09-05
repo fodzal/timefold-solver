@@ -33,6 +33,9 @@ import ai.timefold.solver.core.testdomain.shadow.multi_entity.TestdataMultiEntit
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVisit;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_element_sourced.TestdataElementSourcedSolution;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_element_sourced.TestdataElementSourcedVehicle;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_element_sourced.TestdataElementSourcedVisit;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fact.TestdataFactChainSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fact.TestdataFactChainVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fact.TestdataFactChainVisit;
@@ -46,6 +49,9 @@ import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.Tes
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataWatchedVisitsSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataWatchedVisitsVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataWatchedVisitsVisit;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_loop.TestdataChainLoopSolution;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_loop.TestdataChainLoopVehicle;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_loop.TestdataChainLoopVisit;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_next.TestdataMultiEntityChainNextSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_next.TestdataMultiEntityChainNextVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_next.TestdataMultiEntityChainNextVisit;
@@ -175,7 +181,7 @@ class GraphStructureTest {
     void multiEntityChainStructure() {
         var vehicleA = new TestdataMultiEntityChainVehicle("A", 0);
         var vehicleB = new TestdataMultiEntityChainVehicle("B", 0);
-        vehicleB.getPreviousVehicles().add(vehicleA);
+        vehicleB.setPreviousVehicles(List.of(vehicleA));
         var visit = new TestdataMultiEntityChainVisit("v1");
         // The visits are excluded from the graph, which covers the vehicles
         // and their fact collection dependency.
@@ -249,6 +255,32 @@ class GraphStructureTest {
                 TestdataNonOwnerSolution.buildSolutionDescriptor(), vehicle, visit, depot))
                 .hasFieldOrPropertyWithValue("structure", ARBITRARY)
                 .hasFieldOrPropertyWithValue("blockedElementClass", null);
+    }
+
+    @Test
+    void multiEntityChainWithPlanningVariableChainedVehicles() {
+        var vehicle = new TestdataChainLoopVehicle("A", 0);
+        var visit = new TestdataChainLoopVisit("v1", 1);
+        // The vehicles chain through a planning variable, so the graph has dynamic edges;
+        // that does not concern the visits, which are still represented by a block node.
+        assertThat(GraphStructure.determineGraphStructure(
+                TestdataChainLoopSolution.buildSolutionDescriptor(), vehicle, visit))
+                .hasFieldOrPropertyWithValue("structure",
+                        GraphStructure.ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE)
+                .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
+                .hasFieldOrPropertyWithValue("blockedElementClass", TestdataChainLoopVisit.class);
+    }
+
+    @Test
+    void multiEntityChainWithElementSourcedEndTime() {
+        var vehicle = new TestdataElementSourcedVehicle("A", 0);
+        var visit = new TestdataElementSourcedVisit("v1", 1);
+        // The vehicle's endTime never reads its own startTime, so nothing but the block node's edges
+        // orders it after the route it summarizes.
+        assertThat(GraphStructure.determineGraphStructure(
+                TestdataElementSourcedSolution.buildSolutionDescriptor(), vehicle, visit))
+                .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
+                .hasFieldOrPropertyWithValue("blockedElementClass", TestdataElementSourcedVisit.class);
     }
 
     @Test

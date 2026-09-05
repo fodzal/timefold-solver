@@ -137,16 +137,14 @@ public final class ListElementBlockVariableReferenceGraph<Solution_> implements 
         isProcessing = true;
         try {
             blockUpdater.classifyChangedElements(changedVariableNotifier, this::markBlockNodeChanged);
-            if (!innerGraph.updateChanged()) {
-                // The graph gave up on a structurally flawed solution, leaving block nodes unprocessed.
-                // Their dirty ranges are kept, because the caller undoes the move and updates again;
-                // clearing them would leave the chains that were not walked with stale values.
-                return false;
-            }
-            // A flag whose block node was never processed (e.g. its entity is no longer
-            // in the working solution) must not leak into the next update.
+            var success = innerGraph.updateChanged();
+            // A flag whose block node was never processed must not leak into the next update, whether
+            // because its entity left the working solution or because the graph gave up on a
+            // structurally flawed solution. Nothing is lost by dropping it: every flag comes from the
+            // events of the change being processed, and the caller undoes that change and updates
+            // again, which raises the same events the other way around.
             blockUpdater.clearTransientState();
-            return true;
+            return success;
         } finally {
             isProcessing = false;
         }
