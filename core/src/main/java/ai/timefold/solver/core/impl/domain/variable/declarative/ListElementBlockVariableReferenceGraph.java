@@ -14,7 +14,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * A variable reference graph that excludes a planning list variable's elements from the graph
  * and represents each list entity's chain by a single block node instead;
- * see {@link GraphStructure.ListElementBlock}.
+ * see {@link GraphStructure.GraphStructureAndDirection#blockedElementClass()}.
  * <p>
  * The graph itself covers everything else and is built by the normal machinery,
  * with fixed edges from each entity's pre-chain variables to its block node
@@ -35,7 +35,10 @@ public final class ListElementBlockVariableReferenceGraph<Solution_> implements 
     private final Class<?> elementEntityClass;
     private final Set<VariableMetaModel<?, ?, ?>> monitoredSourceVariableSet;
     private final ChangedVariableNotifier<Solution_> changedVariableNotifier;
-    /** Owner to block node, hoisted out of the per-variable node map for the hot path. */
+    /**
+     * Owner to block node. Hoisted at construction because the per-variable map is keyed by
+     * {@link VariableMetaModel}, whose equals is expensive, and this lookup runs per changed element.
+     */
     private final Map<Object, GraphNode<Solution_>> ownerToBlockNodeMap;
 
     private boolean isProcessing;
@@ -50,6 +53,9 @@ public final class ListElementBlockVariableReferenceGraph<Solution_> implements 
             ChangedVariableNotifier<Solution_> changedVariableNotifier,
             Object[] entities) {
         this.innerGraph = innerGraph;
+        // A graph without nodes, hence without block nodes, only comes out of a solution that has no
+        // list entity at all. Every element is then unassigned, and classifyChangedElements computes
+        // those directly, so there is nothing left for a block node to do.
         this.innerNodeGraph = innerGraph instanceof AbstractVariableReferenceGraph<?, ?> abstractGraph
                 ? (AbstractVariableReferenceGraph<Solution_, ?>) abstractGraph
                 : null;
@@ -103,27 +109,27 @@ public final class ListElementBlockVariableReferenceGraph<Solution_> implements 
     @Override
     public void beforeListVariableChanged(VariableMetaModel<?, ?, ?> variableReference, Object entity,
             List<Object> elementList, int fromIndex, int toIndex) {
-        if (isProcessing) {
-            throw new IllegalStateException("Impossible state: list variable changed during shadow variable update.");
-        }
-        // An element that leaves the list is recorded through its shadow variable changes
-        // (inverse and previous element), which the list variable state supply notifies.
+        // The range is only recorded on the after event: an element that leaves the list keeps no
+        // trace of it there, but the list variable state supply changes its inverse and its previous
+        // or next element, and afterVariableChanged records it from those.
+        // ListElementBlockShadowVariableTest#removingTheLastElementOfARouteUpdatesItsEntity pins it.
         innerGraph.beforeListVariableChanged(variableReference, entity, elementList, fromIndex, toIndex);
     }
 
     @Override
     public void afterListVariableChanged(VariableMetaModel<?, ?, ?> variableReference, Object entity,
             List<Object> elementList, int fromIndex, int toIndex) {
-        if (isProcessing) {
-            throw new IllegalStateException("Impossible state: list variable changed during shadow variable update.");
-        }
+        // Delegated first, so that the graph fails fast on a list change during an update
+        // before anything is recorded.
+        innerGraph.afterListVariableChanged(variableReference, entity, elementList, fromIndex, toIndex);
         for (var elementIndex = fromIndex; elementIndex < toIndex; elementIndex++) {
             blockUpdater.recordChangedElement(elementList.get(elementIndex));
         }
-        // The post-chain variables' dependency set changed with the list's contents,
-        // even when the changed range is empty (e.g. an element was removed).
+        // Stands in for the marking the graph does for a non-blocked model, at the same event:
+        // the block node skips the list element locators, hence also the mark that comes with them.
+        // Without it, removing the list's last element would leave no element to walk and no edge
+        // to the entity, so nothing would recompute its post-chain variables.
         blockUpdater.recordStructuralChange(entity);
-        innerGraph.afterListVariableChanged(variableReference, entity, elementList, fromIndex, toIndex);
     }
 
     @Override
@@ -158,9 +164,12 @@ public final class ListElementBlockVariableReferenceGraph<Solution_> implements 
         if (nodeGraph == null) {
             return;
         }
+        // Every list entity of the solution the graph was built for has a block node.
         var blockNode = ownerToBlockNodeMap.get(owner);
-        if (blockNode != null) {
-            nodeGraph.markChanged(blockNode);
+        if (blockNode == null) {
+            throw new IllegalStateException(
+                    "Impossible state: the list entity (%s) has no block node in the graph.".formatted(owner));
         }
+        nodeGraph.markChanged(blockNode);
     }
 }

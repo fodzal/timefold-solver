@@ -159,8 +159,7 @@ class GraphStructureTest {
                 TestdataListElementSolution.buildSolutionDescriptor(), entity, value))
                 .hasFieldOrPropertyWithValue("structure", NO_DYNAMIC_EDGES)
                 .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
-                .hasFieldOrPropertyWithValue("listElementBlock",
-                        new GraphStructure.ListElementBlock(TestdataListElementValue.class));
+                .hasFieldOrPropertyWithValue("blockedElementClass", TestdataListElementValue.class);
     }
 
     @Test
@@ -185,8 +184,7 @@ class GraphStructureTest {
                 .hasFieldOrPropertyWithValue("structure",
                         GraphStructure.ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE)
                 .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
-                .hasFieldOrPropertyWithValue("listElementBlock",
-                        new GraphStructure.ListElementBlock(TestdataMultiEntityChainVisit.class));
+                .hasFieldOrPropertyWithValue("blockedElementClass", TestdataMultiEntityChainVisit.class);
     }
 
     @Test
@@ -200,8 +198,7 @@ class GraphStructureTest {
                 .hasFieldOrPropertyWithValue("structure",
                         GraphStructure.ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE)
                 .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
-                .hasFieldOrPropertyWithValue("listElementBlock",
-                        new GraphStructure.ListElementBlock(TestdataFactChainVisit.class));
+                .hasFieldOrPropertyWithValue("blockedElementClass", TestdataFactChainVisit.class);
     }
 
     @Test
@@ -213,8 +210,7 @@ class GraphStructureTest {
                 TestdataMultiEntityChainNextSolution.buildSolutionDescriptor(), vehicle, visit))
                 .hasFieldOrPropertyWithValue("structure", NO_DYNAMIC_EDGES)
                 .hasFieldOrPropertyWithValue("direction", ParentVariableType.NEXT)
-                .hasFieldOrPropertyWithValue("listElementBlock",
-                        new GraphStructure.ListElementBlock(TestdataMultiEntityChainNextVisit.class));
+                .hasFieldOrPropertyWithValue("blockedElementClass", TestdataMultiEntityChainNextVisit.class);
     }
 
     @Test
@@ -226,7 +222,7 @@ class GraphStructureTest {
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataWatchedVisitsSolution.buildSolutionDescriptor(), vehicle, watcher, visit))
                 .hasFieldOrPropertyWithValue("structure", ARBITRARY)
-                .hasFieldOrPropertyWithValue("listElementBlock", null);
+                .hasFieldOrPropertyWithValue("blockedElementClass", null);
     }
 
     @Test
@@ -239,7 +235,7 @@ class GraphStructureTest {
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataElementFactSolution.buildSolutionDescriptor(), vehicle, visit1, visit2))
                 .hasFieldOrPropertyWithValue("structure", ARBITRARY)
-                .hasFieldOrPropertyWithValue("listElementBlock", null);
+                .hasFieldOrPropertyWithValue("blockedElementClass", null);
     }
 
     @Test
@@ -252,7 +248,7 @@ class GraphStructureTest {
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataNonOwnerSolution.buildSolutionDescriptor(), vehicle, visit, depot))
                 .hasFieldOrPropertyWithValue("structure", ARBITRARY)
-                .hasFieldOrPropertyWithValue("listElementBlock", null);
+                .hasFieldOrPropertyWithValue("blockedElementClass", null);
     }
 
     @Test

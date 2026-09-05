@@ -38,8 +38,7 @@ class ListElementBlockVariableReferenceGraphTest {
 
         var graphStructureAndDirection = GraphStructure.determineGraphStructure(solutionDescriptor,
                 vehicleA, vehicleB, a1, a2, a3, b1, b2);
-        assertThat(graphStructureAndDirection.listElementBlock())
-                .isEqualTo(new GraphStructure.ListElementBlock(TestdataMultiEntityChainVisit.class));
+        assertThat(graphStructureAndDirection.blockedElementClass()).isEqualTo(TestdataMultiEntityChainVisit.class);
 
         var scoreDirector = Mockito.mock(InnerScoreDirector.class);
         var listStateSupply = Mockito.mock(ListVariableStateSupply.class);

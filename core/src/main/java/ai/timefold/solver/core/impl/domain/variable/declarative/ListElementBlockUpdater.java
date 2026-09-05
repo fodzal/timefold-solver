@@ -18,7 +18,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * Updates the declarative shadow variables of a planning list variable's elements,
  * which are excluded from the variable reference graph and represented by one block node
- * per list entity instead; see {@link GraphStructure.ListElementBlock}.
+ * per list entity instead; see {@link GraphStructure.GraphStructureAndDirection#blockedElementClass()}.
  * <p>
  * A single instance backs every list entity's block node.
  * When a block node is processed, {@link #update(Object, boolean, ChangedVariableNotifier)}
@@ -36,8 +36,9 @@ import org.jspecify.annotations.Nullable;
 public final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Solution_> {
 
     /**
-     * Updater group ids are non-negative;
-     * this value keeps the block nodes out of the other updaters' node maps.
+     * {@link DefaultShadowVariableSessionFactory#getGroupVariableUpdaterInfoMap} allocates the other
+     * updaters' group ids by counting up from zero, so a negative id gives the block nodes a bucket
+     * of their own in {@link VariableReferenceGraphBuilder#addVariableReferenceEntity}.
      */
     private static final int BLOCK_GROUP_ID = -1;
 
@@ -204,8 +205,9 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
     /**
      * Classifies the recorded elements into per-owner dirty ranges and feeds each dirty owner
      * to the given consumer, so its block node can be marked changed.
-     * An unassigned element is reset immediately,
-     * so re-assigning it to the same position is detected as a change.
+     * An unassigned element is recomputed here rather than by a block node, having no list entity;
+     * its suppliers read a null inverse, so it ends up cleared,
+     * and re-assigning it to the same position is detected as a change.
      */
     void classifyChangedElements(ChangedVariableNotifier<Solution_> changedVariableNotifier,
             Consumer<Object> dirtyOwnerConsumer) {
@@ -230,6 +232,8 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
             }
         }
         changedElementList.clear();
+        // Marking is a bit in a set (or a slot in a topologically ordered queue) either way,
+        // so the order these identity maps happen to iterate in does not reach the result.
         for (var owner : ownerToDirtyChainStart.keySet()) {
             dirtyOwnerConsumer.accept(owner);
         }
