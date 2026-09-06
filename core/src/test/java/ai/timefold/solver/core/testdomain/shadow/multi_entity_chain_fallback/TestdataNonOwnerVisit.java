@@ -1,4 +1,4 @@
-package ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_non_owner;
+package ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback;
 
 import ai.timefold.solver.core.api.domain.entity.PlanningEntity;
 import ai.timefold.solver.core.api.domain.variable.InverseRelationShadowVariable;

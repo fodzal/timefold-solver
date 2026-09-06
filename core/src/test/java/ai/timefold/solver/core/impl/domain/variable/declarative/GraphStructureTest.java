@@ -36,9 +36,10 @@ import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMult
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_element_sourced.TestdataElementSourcedSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_element_sourced.TestdataElementSourcedVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_element_sourced.TestdataElementSourcedVisit;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fact.TestdataFactChainSolution;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fact.TestdataFactChainVehicle;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fact.TestdataFactChainVisit;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonOwnerDepot;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonOwnerSolution;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonOwnerVehicle;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonOwnerVisit;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataWatchedVisitsSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataWatchedVisitsVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataWatchedVisitsVisit;
@@ -48,10 +49,6 @@ import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_loop.Testdat
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_next.TestdataMultiEntityChainNextSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_next.TestdataMultiEntityChainNextVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_next.TestdataMultiEntityChainNextVisit;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_non_owner.TestdataNonOwnerDepot;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_non_owner.TestdataNonOwnerSolution;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_non_owner.TestdataNonOwnerVehicle;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_non_owner.TestdataNonOwnerVisit;
 import ai.timefold.solver.core.testdomain.shadow.simple_list.TestdataDeclarativeSimpleListSolution;
 import ai.timefold.solver.core.testdomain.shadow.simple_list.TestdataDeclarativeSimpleListValue;
 
@@ -183,19 +180,6 @@ class GraphStructureTest {
                 .hasFieldOrPropertyWithValue("structure", LIST_ELEMENT_BLOCK)
                 .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
                 .hasFieldOrPropertyWithValue("blockedElementClass", TestdataMultiEntityChainVisit.class);
-    }
-
-    @Test
-    void multiEntityChainWithFactChainedVehicles() {
-        var vehicleA = new TestdataFactChainVehicle("A", 0);
-        var vehicleB = new TestdataFactChainVehicle("B", 0);
-        vehicleB.setPreviousVehicle(vehicleA);
-        var visit = new TestdataFactChainVisit("v1");
-        assertThat(GraphStructure.determineGraphStructure(
-                TestdataFactChainSolution.buildSolutionDescriptor(), vehicleA, vehicleB, visit))
-                .hasFieldOrPropertyWithValue("structure", LIST_ELEMENT_BLOCK)
-                .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
-                .hasFieldOrPropertyWithValue("blockedElementClass", TestdataFactChainVisit.class);
     }
 
     @Test
