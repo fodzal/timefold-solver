@@ -254,45 +254,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         @SuppressWarnings("unchecked")
         var listVariableMetaModel = (VariableMetaModel<Solution_, ?, ?>) listVariableDescriptor.getVariableMetaModel();
 
-        // The pre-chain variables the elements read through their inverse:
-        // when one of them changes during an update, its entity's whole list must be walked,
-        // since any element may read it.
-        // These variables are declarative, so they only ever change through a notifier;
-        // wrapping it observes every such change, and the pre-chain to block node edges
-        // guarantee the flag is set before the entity's block node is processed.
-        var elementReadVariableSet = new LinkedHashSet<VariableMetaModel<?, ?, ?>>();
-        for (var descriptor : elementDescriptorList) {
-            for (var source : descriptor.getSources()) {
-                if (source.parentVariableType() == ParentVariableType.INVERSE) {
-                    // Non-null: the detection rejects inverse sources targeting non-declarative variables.
-                    elementReadVariableSet.add(Objects.requireNonNull(
-                            source.variableSourceReferences().getFirst().downstreamDeclarativeVariableMetamodel()));
-                }
-            }
-        }
-        var wholeChainOwnerSet = Collections.<Object> newSetFromMap(new IdentityHashMap<>());
         var changedVariableNotifier = graphDescriptor.changedVariableNotifier();
-        var flaggingNotifier = elementReadVariableSet.isEmpty() ? changedVariableNotifier
-                : new ChangedVariableNotifier<>(
-                        changedVariableNotifier.beforeVariableChanged(),
-                        (variableDescriptor, entity) -> {
-                            if (elementReadVariableSet.contains(variableDescriptor.getVariableMetaModel())) {
-                                wholeChainOwnerSet.add(entity);
-                            }
-                            changedVariableNotifier.afterVariableChanged().accept(variableDescriptor, entity);
-                        },
-                        changedVariableNotifier.innerScoreDirector());
-
-        var innerGraphDescriptor = new GraphDescriptor<>(graphDescriptor.consistencyTracker(), solutionDescriptor,
-                graphDescriptor.ignoreInconsistentSolutions(), new VariableReferenceGraphBuilder<>(flaggingNotifier),
-                graphDescriptor.entities(), graphDescriptor.graphCreator());
-        var builder = innerGraphDescriptor.variableReferenceGraphBuilder();
-        builder.excludesListElements = true;
-        // Per-variable nodes for the non-element classes, whatever their structure:
-        // grouped single-entity nodes could put a pre-chain variable in a node ordered
-        // after the block node, breaking the pre-chain before block node guarantee.
-        populateArbitraryGraph(innerGraphDescriptor, innerDescriptorList);
-
         // Non-null: the detection requires the list entity to have declarative shadow variables.
         var ownerConsistencyState = graphDescriptor.consistencyTracker()
                 .getDeclarativeEntityConsistencyState(Objects.requireNonNull(ownerDescriptor));
@@ -314,7 +276,43 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 Objects.requireNonNull(graphStructureAndDirection.direction()));
         var blockUpdater = new ListElementBlockUpdater<>(listVariableMetaModel, ownerConsistencyState,
                 elementConsistencyState, sortedElementDescriptors, topologicalSorter, ownerToFirstElement,
-                hasNoNonDeclarativeSourcesFromParent(elementDescriptorList), wholeChainOwnerSet);
+                hasNoNonDeclarativeSourcesFromParent(elementDescriptorList));
+
+        // The pre-chain variables the elements read through their inverse: when one of them changes
+        // during an update, its entity's whole list must be walked, since any element may read it.
+        // These variables are declarative, so they only ever change through a notifier; wrapping it
+        // observes every such change, and the pre-chain to block node edges guarantee the whole
+        // chain is asked for before the entity's block node is processed.
+        var elementReadVariableSet = new LinkedHashSet<VariableMetaModel<?, ?, ?>>();
+        for (var descriptor : elementDescriptorList) {
+            for (var source : descriptor.getSources()) {
+                if (source.parentVariableType() == ParentVariableType.INVERSE) {
+                    // Non-null: the detection rejects inverse sources targeting non-declarative variables.
+                    elementReadVariableSet.add(Objects.requireNonNull(
+                            source.variableSourceReferences().getFirst().downstreamDeclarativeVariableMetamodel()));
+                }
+            }
+        }
+        var flaggingNotifier = elementReadVariableSet.isEmpty() ? changedVariableNotifier
+                : new ChangedVariableNotifier<>(
+                        changedVariableNotifier.beforeVariableChanged(),
+                        (variableDescriptor, entity) -> {
+                            if (elementReadVariableSet.contains(variableDescriptor.getVariableMetaModel())) {
+                                blockUpdater.recordWholeChainDirty(entity);
+                            }
+                            changedVariableNotifier.afterVariableChanged().accept(variableDescriptor, entity);
+                        },
+                        changedVariableNotifier.innerScoreDirector());
+
+        var innerGraphDescriptor = new GraphDescriptor<>(graphDescriptor.consistencyTracker(), solutionDescriptor,
+                graphDescriptor.ignoreInconsistentSolutions(), new VariableReferenceGraphBuilder<>(flaggingNotifier),
+                graphDescriptor.entities(), graphDescriptor.graphCreator());
+        var builder = innerGraphDescriptor.variableReferenceGraphBuilder();
+        builder.excludesListElements = true;
+        // Per-variable nodes for the non-element classes, whatever their structure:
+        // grouped single-entity nodes could put a pre-chain variable in a node ordered
+        // after the block node, breaking the pre-chain before block node guarantee.
+        populateArbitraryGraph(innerGraphDescriptor, innerDescriptorList);
 
         var blockEdgeList = addBlockNodesAndCollectEdges(builder, graphDescriptor.entities(), ownerEntityClass,
                 listVariableMetaModel, blockUpdater, elementReadVariableSet, directPostChainVariableIdList);

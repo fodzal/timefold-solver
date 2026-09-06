@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
@@ -24,9 +23,8 @@ import org.jspecify.annotations.Nullable;
  * walks the entity's chain from the earliest dirty element and reports whether anything
  * changed, which propagates to the entity's post-chain variables through the graph's edges.
  * The dirty ranges are maintained by {@link ListElementBlockVariableReferenceGraph}
- * from the list variable's change events and the elements' source variable changes;
- * a change of a pre-chain variable read by the elements flags its entity for a whole-chain
- * walk instead, because any element may read it.
+ * from the list variable's change events and the elements' source variable changes.
+ * An entity with no dirty range has its whole chain walked.
  * <p>
  * When the block node is part of a dependency loop, the elements follow their entity:
  * they are marked inconsistent and their variables are set to null.
@@ -54,10 +52,10 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
 
     // Mutable dirty state, written by ListElementBlockVariableReferenceGraph
     // and by the notifier wrapper created in DefaultShadowVariableSessionFactory.
+    // An owner absent from these maps has its whole chain walked.
     private final List<Object> changedElementList;
     private final IdentityHashMap<Object, Object> ownerToDirtyChainStart;
     private final IdentityHashMap<Object, Object> ownerToDirtyChainEnd;
-    private final Set<Object> wholeChainOwnerSet;
 
     @SuppressWarnings("unchecked")
     ListElementBlockUpdater(
@@ -67,8 +65,7 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
             List<DeclarativeShadowVariableDescriptor<Solution_>> sortedElementDescriptorList,
             TopologicalSorter topologicalSorter,
             Function<Object, @Nullable Object> ownerToFirstElement,
-            boolean canTerminateEarly,
-            Set<Object> wholeChainOwnerSet) {
+            boolean canTerminateEarly) {
         this.listVariableMetaModel = listVariableMetaModel;
         this.ownerConsistencyState = ownerConsistencyState;
         this.elementConsistencyState = elementConsistencyState;
@@ -77,7 +74,6 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
         this.chainOrderComparator = topologicalSorter.comparator();
         this.ownerToFirstElement = ownerToFirstElement;
         this.canTerminateEarly = canTerminateEarly;
-        this.wholeChainOwnerSet = wholeChainOwnerSet;
         this.changedElementList = new ArrayList<>();
         this.ownerToDirtyChainStart = new IdentityHashMap<>();
         this.ownerToDirtyChainEnd = new IdentityHashMap<>();
@@ -115,29 +111,25 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
     @Override
     public boolean update(Object owner, boolean isEntityInconsistent,
             ChangedVariableNotifier<Solution_> changedVariableNotifier) {
-        var dirtyChainStart = ownerToDirtyChainStart.remove(owner);
+        var chainStart = ownerToDirtyChainStart.remove(owner);
         var dirtyChainEnd = ownerToDirtyChainEnd.remove(owner);
-        var walkWholeChain = wholeChainOwnerSet.remove(owner);
         if (isEntityInconsistent) {
             // The owner is part of a dependency loop the solver may break later;
             // its elements read its pre-chain variables, so they are inconsistent with it.
             return markChainInconsistent(owner, changedVariableNotifier);
         }
         var firstElement = ownerToFirstElement.apply(owner);
-        if (firstElement != null && !elementConsistencyState.isEntityConsistent(firstElement)) {
-            // The owner recovered from a dependency loop; its whole chain was inconsistent.
-            walkWholeChain = true;
-        }
-        var chainStart = dirtyChainStart;
-        if (walkWholeChain
-                && firstElement != null
-                && (chainStart == null || chainOrderComparator.compare(firstElement, chainStart) < 0)) {
+        if (chainStart == null
+                || (firstElement != null && !elementConsistencyState.isEntityConsistent(firstElement))) {
+            // Nothing was recorded, or the owner recovered from a dependency loop that left its
+            // whole chain inconsistent; either way the chain is walked from its first element.
             chainStart = firstElement;
+            dirtyChainEnd = null;
         }
-        return walkChain(chainStart, dirtyChainEnd, walkWholeChain, changedVariableNotifier);
+        return walkChain(chainStart, dirtyChainEnd, changedVariableNotifier);
     }
 
-    private boolean walkChain(@Nullable Object chainStart, @Nullable Object dirtyChainEnd, boolean walkWholeChain,
+    private boolean walkChain(@Nullable Object chainStart, @Nullable Object dirtyChainEnd,
             ChangedVariableNotifier<Solution_> changedVariableNotifier) {
         if (chainStart == null) {
             return false;
@@ -153,10 +145,11 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
                 anyElementVariableChanged |= updater.updateIfChanged(current, changedVariableNotifier);
             }
             anyElementChangedInWalk |= anyElementVariableChanged;
-            if (canTerminateEarly && !walkWholeChain && !anyElementVariableChanged
             // A swap can create multiple non-contiguous dirty elements on the same chain,
-            // so only terminate early once the last dirty element has been reached.
-                    && (dirtyChainEnd == null || chainOrderComparator.compare(current, dirtyChainEnd) >= 0)) {
+            // so only terminate early once the last dirty element has been reached;
+            // a chain walked in full has no such element and is walked to its end.
+            if (canTerminateEarly && !anyElementVariableChanged && dirtyChainEnd != null
+                    && chainOrderComparator.compare(current, dirtyChainEnd) >= 0) {
                 break;
             }
             current = nextInChain.apply(current);
@@ -185,6 +178,15 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
      */
     void recordChangedElement(Object element) {
         changedElementList.add(element);
+    }
+
+    /**
+     * Records that the whole chain of the given entity must be walked, because a variable its
+     * elements read through their inverse changed during the update.
+     */
+    void recordWholeChainDirty(Object owner) {
+        ownerToDirtyChainStart.remove(owner);
+        ownerToDirtyChainEnd.remove(owner);
     }
 
     /**
@@ -231,6 +233,5 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
     void clearTransientState() {
         ownerToDirtyChainStart.clear();
         ownerToDirtyChainEnd.clear();
-        wholeChainOwnerSet.clear();
     }
 }
