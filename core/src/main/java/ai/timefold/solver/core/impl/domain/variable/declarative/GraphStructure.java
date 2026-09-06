@@ -93,10 +93,8 @@ public enum GraphStructure {
 
         var blockAndDirection = determineListElementBlock(solutionDescriptor, declarativeShadowVariableDescriptors);
         if (blockAndDirection != null) {
-            return new GraphStructureAndDirection(LIST_ELEMENT_BLOCK,
-                    blockAndDirection.parentMetaModel(),
-                    blockAndDirection.direction(),
-                    blockAndDirection.elementEntityClass());
+            return new GraphStructureAndDirection(LIST_ELEMENT_BLOCK, null,
+                    blockAndDirection.direction(), blockAndDirection.elementEntityClass());
         }
         return determineGraphStructure(declarativeShadowVariableDescriptors, entities);
     }
@@ -176,9 +174,7 @@ public enum GraphStructure {
         }
     }
 
-    private record ListElementBlockAndDirection(Class<?> elementEntityClass,
-            VariableMetaModel<?, ?, ?> parentMetaModel,
-            ParentVariableType direction) {
+    private record ListElementBlockAndDirection(Class<?> elementEntityClass, ParentVariableType direction) {
     }
 
     /**
@@ -319,7 +315,7 @@ public enum GraphStructure {
                 }
             }
         }
-        return new ListElementBlockAndDirection(elementEntityClass, parentMetaModel, direction);
+        return new ListElementBlockAndDirection(elementEntityClass, direction);
     }
 
     private static <Solution_> boolean doEntitiesUseDeclarativeShadowVariables(

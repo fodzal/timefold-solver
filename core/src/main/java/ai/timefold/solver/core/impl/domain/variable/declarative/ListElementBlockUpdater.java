@@ -30,7 +30,7 @@ import org.jspecify.annotations.Nullable;
  * they are marked inconsistent and their variables are set to null.
  */
 @NullMarked
-public final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Solution_> {
+final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Solution_> {
 
     /**
      * {@link DefaultShadowVariableSessionFactory#getGroupVariableUpdaterInfoMap} allocates the other

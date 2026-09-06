@@ -27,7 +27,7 @@ import org.jspecify.annotations.Nullable;
  * and marks the dirty entities' block nodes before delegating the update.
  */
 @NullMarked
-public final class ListElementBlockVariableReferenceGraph<Solution_> implements VariableReferenceGraph {
+final class ListElementBlockVariableReferenceGraph<Solution_> implements VariableReferenceGraph {
 
     private final VariableReferenceGraph innerGraph;
     private final @Nullable AbstractVariableReferenceGraph<Solution_, ?> innerNodeGraph;
