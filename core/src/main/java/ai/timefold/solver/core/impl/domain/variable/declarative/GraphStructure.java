@@ -3,7 +3,6 @@ package ai.timefold.solver.core.impl.domain.variable.declarative;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 import ai.timefold.solver.core.impl.domain.solution.descriptor.SolutionDescriptor;
 import ai.timefold.solver.core.impl.util.MutableInt;
@@ -259,7 +258,16 @@ public enum GraphStructure {
             // existing structures anyway.
             return null;
         }
-        var postChainVariableSet = computePostChainVariables(declarativeShadowVariableDescriptors, elementEntityClass);
+        // A variable sourced from the list's elements is computed after their chain is walked.
+        var postChainVariableIdSet = new LinkedHashSet<VariableMetaModel<?, ?, ?>>();
+        for (var descriptor : declarativeShadowVariableDescriptors) {
+            for (var source : descriptor.getSources()) {
+                if (source.parentVariableType() == ParentVariableType.LIST_ELEMENT) {
+                    postChainVariableIdSet.add(descriptor.getVariableMetaModel());
+                    break;
+                }
+            }
+        }
         for (var descriptor : declarativeShadowVariableDescriptors) {
             var isElementSource = elementEntityClass.isAssignableFrom(descriptor.getEntityDescriptor().getEntityClass());
             for (var variableSource : descriptor.getSources()) {
@@ -278,12 +286,13 @@ public enum GraphStructure {
                             }
                         }
                         case INVERSE -> {
-                            // Only safe when it targets a pre-chain declarative variable of the list
-                            // entity: post-chain variables depend on the chain itself, which would
-                            // require a cycle through the block node.
+                            // Only safe when it targets a declarative variable of the list entity
+                            // that is not itself sourced from the elements, which would need a cycle
+                            // through the block node. Reaching one indirectly is caught at build
+                            // time, where the block edges close the cycle the graph then reports.
                             var inverseTarget = variableSource.variableSourceReferences().getFirst()
                                     .downstreamDeclarativeVariableMetamodel();
-                            if (inverseTarget == null || postChainVariableSet.contains(inverseTarget)) {
+                            if (inverseTarget == null || postChainVariableIdSet.contains(inverseTarget)) {
                                 return null;
                             }
                         }
@@ -311,49 +320,6 @@ public enum GraphStructure {
             }
         }
         return new ListElementBlockAndDirection(elementEntityClass, parentMetaModel, direction);
-    }
-
-    /**
-     * Classifies the declarative shadow variables of the classes outside the element block:
-     * a variable is post-chain when it depends on its own entity's list elements,
-     * directly through a list element source or transitively through another variable
-     * of the same entity.
-     * Pre-chain variables can be computed before the entity's chain is walked;
-     * post-chain variables must be computed after it.
-     */
-    static <Solution_> Set<VariableMetaModel<?, ?, ?>> computePostChainVariables(
-            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
-            Class<?> elementEntityClass) {
-        var nonElementDescriptorList = declarativeShadowVariableDescriptors.stream()
-                .filter(descriptor -> !elementEntityClass
-                        .isAssignableFrom(descriptor.getEntityDescriptor().getEntityClass()))
-                .toList();
-        var postChainVariableSet = new LinkedHashSet<VariableMetaModel<?, ?, ?>>();
-        var changed = true;
-        while (changed) {
-            changed = false;
-            for (var descriptor : nonElementDescriptorList) {
-                var variableMetaModel = descriptor.getVariableMetaModel();
-                if (postChainVariableSet.contains(variableMetaModel)) {
-                    continue;
-                }
-                for (var source : descriptor.getSources()) {
-                    // A cross-entity source (a fact path or a variable path) is ordered by
-                    // the graph's own edges, so it does not propagate post-chain status.
-                    var isPostChain = source.parentVariableType() == ParentVariableType.LIST_ELEMENT
-                            || (source.parentVariableType() == ParentVariableType.NO_PARENT
-                                    && source.variableSourceReferences().stream()
-                                            .map(VariableSourceReference::variableMetaModel)
-                                            .anyMatch(postChainVariableSet::contains));
-                    if (isPostChain) {
-                        postChainVariableSet.add(variableMetaModel);
-                        changed = true;
-                        break;
-                    }
-                }
-            }
-        }
-        return postChainVariableSet;
     }
 
     private static <Solution_> boolean doEntitiesUseDeclarativeShadowVariables(
