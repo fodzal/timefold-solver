@@ -67,8 +67,8 @@ public enum GraphStructure {
     private static final Logger LOGGER = LoggerFactory.getLogger(GraphStructure.class);
 
     /**
-     * @param blockedElementClass the list elements the block nodes represent,
-     *        non-null exactly for {@link #LIST_ELEMENT_BLOCK}
+     * The blocked element class is the list elements the block nodes represent,
+     * non-null exactly for {@link #LIST_ELEMENT_BLOCK}.
      */
     public record GraphStructureAndDirection(GraphStructure structure,
             @Nullable VariableMetaModel<?, ?, ?> parentMetaModel,
@@ -86,8 +86,11 @@ public enum GraphStructure {
             SolutionDescriptor<Solution_> solutionDescriptor,
             Object... entities) {
         var declarativeShadowVariableDescriptors = solutionDescriptor.getDeclarativeShadowVariableDescriptors();
-        if (declarativeShadowVariableDescriptors.isEmpty()
-                || !doEntitiesUseDeclarativeShadowVariables(declarativeShadowVariableDescriptors, entities)) {
+        if (declarativeShadowVariableDescriptors.isEmpty()) {
+            return new GraphStructureAndDirection(EMPTY, null, null);
+        }
+
+        if (!doEntitiesUseDeclarativeShadowVariables(declarativeShadowVariableDescriptors, entities)) {
             return new GraphStructureAndDirection(EMPTY, null, null);
         }
 
@@ -102,10 +105,6 @@ public enum GraphStructure {
     private static <Solution_> GraphStructureAndDirection determineGraphStructure(
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
             Object... entities) {
-        if (declarativeShadowVariableDescriptors.isEmpty()
-                || !doEntitiesUseDeclarativeShadowVariables(declarativeShadowVariableDescriptors, entities)) {
-            return new GraphStructureAndDirection(EMPTY, null, null);
-        }
         var multipleDeclarativeEntityClasses = declarativeShadowVariableDescriptors.stream()
                 .map(variable -> variable.getEntityDescriptor().getEntityClass())
                 .distinct().count() > 1;
@@ -236,14 +235,12 @@ public enum GraphStructure {
             } else if (entityClass.isAssignableFrom(elementEntityClass)) {
                 // A declarative superclass of the elements would be entangled with the block.
                 return null;
-            } else {
-                if (entityClass.isAssignableFrom(ownerEntityClass)) {
-                    hasOwnerDescriptors = true;
-                    if (descriptor.getAlignmentKeyMap() != null) {
-                        // The block node recomputes the list entity's post-chain variables one entity
-                        // at a time, which an alignment key's grouped updater contradicts.
-                        return null;
-                    }
+            } else if (entityClass.isAssignableFrom(ownerEntityClass)) {
+                hasOwnerDescriptors = true;
+                if (descriptor.getAlignmentKeyMap() != null) {
+                    // The block node recomputes the list entity's post-chain variables one entity
+                    // at a time, which an alignment key's grouped updater contradicts.
+                    return null;
                 }
             }
         }
