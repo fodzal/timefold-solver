@@ -122,8 +122,11 @@ public final class ListElementBlockVariableReferenceGraph<Solution_> implements 
         // Delegated first, so that the graph fails fast on a list change during an update
         // before anything is recorded.
         innerGraph.afterListVariableChanged(variableReference, entity, elementList, fromIndex, toIndex);
-        for (var elementIndex = fromIndex; elementIndex < toIndex; elementIndex++) {
-            blockUpdater.recordChangedElement(elementList.get(elementIndex));
+        if (fromIndex < toIndex) {
+            // The changed elements are classified into a dirty range, and every element between
+            // these two ends up inside it, whichever way round the chain order runs.
+            blockUpdater.recordChangedElement(elementList.get(fromIndex));
+            blockUpdater.recordChangedElement(elementList.get(toIndex - 1));
         }
         // Stands in for the marking the graph does for a non-blocked model, at the same event:
         // the block node skips the list element locators, hence also the mark that comes with them.
