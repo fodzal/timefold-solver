@@ -3,7 +3,7 @@ package ai.timefold.solver.core.impl.domain.variable.declarative;
 import static ai.timefold.solver.core.impl.domain.variable.declarative.GraphStructure.ARBITRARY;
 import static ai.timefold.solver.core.impl.domain.variable.declarative.GraphStructure.ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE;
 import static ai.timefold.solver.core.impl.domain.variable.declarative.GraphStructure.EMPTY;
-import static ai.timefold.solver.core.impl.domain.variable.declarative.GraphStructure.NO_DYNAMIC_EDGES;
+import static ai.timefold.solver.core.impl.domain.variable.declarative.GraphStructure.LIST_ELEMENT_BLOCK;
 import static ai.timefold.solver.core.impl.domain.variable.declarative.GraphStructure.SINGLE_DIRECTIONAL_PARENT;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -156,11 +156,9 @@ class GraphStructureTest {
     void listElementStructure() {
         var entity = new TestdataListElementEntity("e1");
         var value = new TestdataListElementValue("v1");
-        // The elements are excluded from the graph and represented by per-entity block nodes;
-        // the structure describes the graph covering the remaining classes.
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataListElementSolution.buildSolutionDescriptor(), entity, value))
-                .hasFieldOrPropertyWithValue("structure", NO_DYNAMIC_EDGES)
+                .hasFieldOrPropertyWithValue("structure", LIST_ELEMENT_BLOCK)
                 .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
                 .hasFieldOrPropertyWithValue("blockedElementClass", TestdataListElementValue.class);
     }
@@ -180,12 +178,9 @@ class GraphStructureTest {
         var vehicleB = new TestdataMultiEntityChainVehicle("B", 0);
         vehicleB.setPreviousVehicles(List.of(vehicleA));
         var visit = new TestdataMultiEntityChainVisit("v1");
-        // The visits are excluded from the graph, which covers the vehicles
-        // and their fact collection dependency.
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataMultiEntityChainSolution.buildSolutionDescriptor(), vehicleA, vehicleB, visit))
-                .hasFieldOrPropertyWithValue("structure",
-                        GraphStructure.ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE)
+                .hasFieldOrPropertyWithValue("structure", LIST_ELEMENT_BLOCK)
                 .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
                 .hasFieldOrPropertyWithValue("blockedElementClass", TestdataMultiEntityChainVisit.class);
     }
@@ -198,8 +193,7 @@ class GraphStructureTest {
         var visit = new TestdataFactChainVisit("v1");
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataFactChainSolution.buildSolutionDescriptor(), vehicleA, vehicleB, visit))
-                .hasFieldOrPropertyWithValue("structure",
-                        GraphStructure.ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE)
+                .hasFieldOrPropertyWithValue("structure", LIST_ELEMENT_BLOCK)
                 .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
                 .hasFieldOrPropertyWithValue("blockedElementClass", TestdataFactChainVisit.class);
     }
@@ -208,10 +202,9 @@ class GraphStructureTest {
     void multiEntityChainNextStructure() {
         var vehicle = new TestdataMultiEntityChainNextVehicle("A", 100);
         var visit = new TestdataMultiEntityChainNextVisit("v1");
-        // The vehicle's fact collection is empty, so the graph has no dynamic edges.
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataMultiEntityChainNextSolution.buildSolutionDescriptor(), vehicle, visit))
-                .hasFieldOrPropertyWithValue("structure", NO_DYNAMIC_EDGES)
+                .hasFieldOrPropertyWithValue("structure", LIST_ELEMENT_BLOCK)
                 .hasFieldOrPropertyWithValue("direction", ParentVariableType.NEXT)
                 .hasFieldOrPropertyWithValue("blockedElementClass", TestdataMultiEntityChainNextVisit.class);
     }
@@ -245,12 +238,9 @@ class GraphStructureTest {
     void multiEntityChainWithPlanningVariableChainedVehicles() {
         var vehicle = new TestdataChainLoopVehicle("A", 0);
         var visit = new TestdataChainLoopVisit("v1", 1);
-        // The vehicles chain through a planning variable, so the graph has dynamic edges;
-        // that does not concern the visits, which are still represented by a block node.
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataChainLoopSolution.buildSolutionDescriptor(), vehicle, visit))
-                .hasFieldOrPropertyWithValue("structure",
-                        GraphStructure.ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE)
+                .hasFieldOrPropertyWithValue("structure", LIST_ELEMENT_BLOCK)
                 .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
                 .hasFieldOrPropertyWithValue("blockedElementClass", TestdataChainLoopVisit.class);
     }

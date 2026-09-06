@@ -49,21 +49,27 @@ public enum GraphStructure {
     /**
      * A graph structure that accepts all graphs.
      */
-    ARBITRARY;
+    ARBITRARY,
+
+    /**
+     * A graph structure where a planning list variable's elements are excluded from the graph,
+     * which covers the other entity classes with per-variable nodes. Each list entity additionally
+     * gets a single block node representing its whole chain of elements, ordered after the entity's
+     * pre-chain variables (which the elements read through their inverse) and before its post-chain
+     * variables (which read the elements). When the block node is processed, it walks the entity's
+     * list from the earliest dirty element in the direction of
+     * {@link GraphStructureAndDirection#direction()}.
+     * This decomposition is valid because the elements only read their chain and, through their
+     * inverse, pre-chain declarative variables of their own list entity, and because the other
+     * classes only reach the elements through the list variable itself.
+     */
+    LIST_ELEMENT_BLOCK;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GraphStructure.class);
 
     /**
-     * When {@code blockedElementClass} is non-null, the planning list variable's elements are excluded from the variable
-     * reference graph, which covers the other entity classes with per-variable nodes.
-     * Each list entity additionally gets a single block node representing its whole chain
-     * of elements, ordered after the entity's pre-chain variables (which the elements read
-     * through their inverse) and before its post-chain variables (which read the elements).
-     * When the block node is processed, it walks the entity's list from the earliest dirty
-     * element in the direction of {@link GraphStructureAndDirection#direction()}.
-     * This decomposition is valid because the elements only read their chain and,
-     * through their inverse, pre-chain declarative variables of their own list entity,
-     * and because the other classes only reach the elements through the list variable itself.
+     * @param blockedElementClass the list elements the block nodes represent,
+     *        non-null exactly for {@link #LIST_ELEMENT_BLOCK}
      */
     public record GraphStructureAndDirection(GraphStructure structure,
             @Nullable VariableMetaModel<?, ?, ?> parentMetaModel,
@@ -88,23 +94,16 @@ public enum GraphStructure {
 
         var blockAndDirection = determineListElementBlock(solutionDescriptor, declarativeShadowVariableDescriptors);
         if (blockAndDirection != null) {
-            var elementEntityClass = blockAndDirection.elementEntityClass();
-            var innerDescriptors = declarativeShadowVariableDescriptors.stream()
-                    .filter(descriptor -> !elementEntityClass
-                            .isAssignableFrom(descriptor.getEntityDescriptor().getEntityClass()))
-                    .toList();
-            var innerStructure = determineGraphStructure(innerDescriptors, elementEntityClass, entities);
-            return new GraphStructureAndDirection(innerStructure.structure(),
+            return new GraphStructureAndDirection(LIST_ELEMENT_BLOCK,
                     blockAndDirection.parentMetaModel(),
                     blockAndDirection.direction(),
-                    elementEntityClass);
+                    blockAndDirection.elementEntityClass());
         }
-        return determineGraphStructure(declarativeShadowVariableDescriptors, null, entities);
+        return determineGraphStructure(declarativeShadowVariableDescriptors, entities);
     }
 
     private static <Solution_> GraphStructureAndDirection determineGraphStructure(
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
-            @Nullable Class<?> blockElementClass,
             Object... entities) {
         if (declarativeShadowVariableDescriptors.isEmpty()
                 || !doEntitiesUseDeclarativeShadowVariables(declarativeShadowVariableDescriptors, entities)) {
@@ -151,15 +150,7 @@ public enum GraphStructure {
                     }
                     // The group variable is unused/always empty
                 }
-                case INDIRECT, INVERSE, VARIABLE -> isArbitrary = true;
-                case LIST_ELEMENT -> {
-                    // Under a list element block, the list's elements are not part of the graph;
-                    // the block node marks the target variable changed when an element changes,
-                    // so the source does not need any per-element edges.
-                    if (blockElementClass == null) {
-                        isArbitrary = true;
-                    }
-                }
+                case INDIRECT, INVERSE, VARIABLE, LIST_ELEMENT -> isArbitrary = true;
                 case NEXT, PREVIOUS -> {
                     if (parentMetaModel == null) {
                         parentMetaModel = variableSource.variableSourceReferences().get(0).variableMetaModel();
@@ -238,7 +229,6 @@ public enum GraphStructure {
             // so the element class must cover the list's elements and be distinct from the list entity.
             return null;
         }
-        var hasNonElementDescriptors = false;
         var hasOwnerDescriptors = false;
         for (var descriptor : declarativeShadowVariableDescriptors) {
             var entityClass = descriptor.getEntityDescriptor().getEntityClass();
@@ -252,7 +242,6 @@ public enum GraphStructure {
                 // A declarative superclass of the elements would be entangled with the block.
                 return null;
             } else {
-                hasNonElementDescriptors = true;
                 if (entityClass.isAssignableFrom(ownerEntityClass)) {
                     hasOwnerDescriptors = true;
                     if (descriptor.getAlignmentKeyMap() != null) {
@@ -263,13 +252,11 @@ public enum GraphStructure {
                 }
             }
         }
-        if (!hasNonElementDescriptors) {
-            // A model with only element variables is covered by the existing structures.
-            return null;
-        }
         if (!hasOwnerDescriptors) {
             // The block node tracks its looped status through the list entity's consistency state,
             // which only exists when the list entity has declarative shadow variables of its own.
+            // A model whose only declarative variables are its elements' is covered by the
+            // existing structures anyway.
             return null;
         }
         var postChainVariableSet = computePostChainVariables(declarativeShadowVariableDescriptors, elementEntityClass);

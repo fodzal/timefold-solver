@@ -182,12 +182,11 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         // Walking a list needs the score director's list variable state supply;
         // without one, the whole model is covered by the arbitrary graph.
         var hasScoreDirector = graphDescriptor.changedVariableNotifier().innerScoreDirector() != null;
-        if (graphStructureAndDirection.blockedElementClass() != null) {
-            return hasScoreDirector ? buildListElementBlockGraph(graphDescriptor, graphStructureAndDirection)
-                    : buildArbitraryGraph(graphDescriptor);
-        }
         return switch (graphStructureAndDirection.structure()) {
             case EMPTY -> EmptyVariableReferenceGraph.INSTANCE;
+            case LIST_ELEMENT_BLOCK -> hasScoreDirector
+                    ? buildListElementBlockGraph(graphDescriptor, graphStructureAndDirection)
+                    : buildArbitraryGraph(graphDescriptor);
             case SINGLE_DIRECTIONAL_PARENT -> hasScoreDirector
                     ? buildSingleDirectionalParentGraph(graphDescriptor, graphStructureAndDirection)
                     : buildArbitraryGraph(graphDescriptor);
