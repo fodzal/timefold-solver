@@ -177,16 +177,22 @@ public final class VariableReferenceGraphBuilder<Solution_> {
         return variableReferenceToContainingNodeMap.getOrDefault(variableId, Collections.emptyMap()).get(entity);
     }
 
-    private void assertNoFixedLoops() {
+    /**
+     * @return a graph of this builder's fixed edges alone, to test candidate edges against
+     */
+    DefaultTopologicalOrderGraph newFixedEdgeGraph() {
         var graph = new DefaultTopologicalOrderGraph(nodeList.size());
         for (var fixedEdge : fixedEdges.entrySet()) {
             var fromNodeId = fixedEdge.getKey().graphNodeId();
             for (var toNode : fixedEdge.getValue()) {
-                var toNodeId = toNode.graphNodeId();
-                graph.addEdge(fromNodeId, toNodeId);
+                graph.addEdge(fromNodeId, toNode.graphNodeId());
             }
         }
+        return graph;
+    }
 
+    private void assertNoFixedLoops() {
+        var graph = newFixedEdgeGraph();
         var changedBitSet = new BitSet();
         graph.commitChanges(changedBitSet);
 

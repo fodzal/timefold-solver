@@ -313,76 +313,91 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         var topologicalSorter = getTopologicalSorter(solutionDescriptor,
                 Objects.requireNonNull(changedVariableNotifier.innerScoreDirector()),
                 Objects.requireNonNull(graphStructureAndDirection.direction()));
-        var canTerminateEarly = hasNoNonDeclarativeSourcesFromParent(elementDescriptorList);
-
         var blockUpdater = new ListElementBlockUpdater<>(listVariableMetaModel, ownerConsistencyState,
                 elementConsistencyState, sortedElementDescriptors, topologicalSorter, ownerToFirstElement,
-                canTerminateEarly, wholeChainOwnerSet);
+                hasNoNonDeclarativeSourcesFromParent(elementDescriptorList), wholeChainOwnerSet);
 
-        // One block node per list entity, keyed by the list variable itself, so that a lookup by
-        // variable and entity finds it. AbstractVariableReferenceGraph's constructor replays
-        // afterVariableChanged for every variable an after processor was registered for, the list
-        // variable among them, which is what marks every block node changed for the initial walk.
-        var ownerList = new ArrayList<>();
-        for (var entity : graphDescriptor.entities()) {
-            if (ownerEntityClass.isInstance(entity)) {
-                ownerList.add(entity);
-                builder.addVariableReferenceEntity(entity, List.of(blockUpdater));
-            }
+        var blockEdgeList = addBlockNodesAndCollectEdges(builder, graphDescriptor.entities(), ownerEntityClass,
+                listVariableMetaModel, blockUpdater, elementReadVariableSet, directPostChainVariableIdList);
+        if (!addBlockEdgesUnlessTheyLoop(builder, blockEdgeList)) {
+            LOGGER.trace("The block node edges would form a dependency loop; falling back to the arbitrary graph.");
+            return buildArbitraryGraph(graphDescriptor);
         }
-
-        var blockEdgeFromList = new ArrayList<GraphNode<Solution_>>();
-        var blockEdgeToList = new ArrayList<GraphNode<Solution_>>();
-        for (var owner : ownerList) {
-            var blockNode = builder.lookupOrError(listVariableMetaModel, owner);
-            for (var preChainVariableId : elementReadVariableSet) {
-                var preChainNode = builder.lookupOrNull(preChainVariableId, owner);
-                if (preChainNode != null) {
-                    blockEdgeFromList.add(preChainNode);
-                    blockEdgeToList.add(blockNode);
-                }
-            }
-            for (var postChainVariableId : directPostChainVariableIdList) {
-                var postChainNode = builder.lookupOrNull(postChainVariableId, owner);
-                if (postChainNode != null) {
-                    blockEdgeFromList.add(blockNode);
-                    blockEdgeToList.add(postChainNode);
-                }
-            }
-        }
-
-        // The block edges overapproximate the per-element dependencies:
-        // when the cross-entity fact dependencies form a cycle at the entity level,
-        // the arbitrary graph only treats it as a runtime loop through the actual elements,
-        // which the solver can break, so such a model must not fail fast here.
-        var fixedEdgeGraph = new DefaultTopologicalOrderGraph(builder.nodeList.size());
-        for (var fixedEdgeEntry : builder.fixedEdges.entrySet()) {
-            for (var toNode : fixedEdgeEntry.getValue()) {
-                fixedEdgeGraph.addEdge(fixedEdgeEntry.getKey().graphNodeId(), toNode.graphNodeId());
-            }
-        }
-        if (!fixedEdgeGraph.commitChanges(new BitSet())) {
-            // No genuine fixed loops; check whether the block edges would create one.
-            for (var edgeIndex = 0; edgeIndex < blockEdgeFromList.size(); edgeIndex++) {
-                fixedEdgeGraph.addEdge(blockEdgeFromList.get(edgeIndex).graphNodeId(),
-                        blockEdgeToList.get(edgeIndex).graphNodeId());
-            }
-            if (fixedEdgeGraph.commitChanges(new BitSet())) {
-                LOGGER.trace(
-                        "The block node edges would form a dependency loop; falling back to the arbitrary graph.");
-                return buildArbitraryGraph(graphDescriptor);
-            }
-            for (var edgeIndex = 0; edgeIndex < blockEdgeFromList.size(); edgeIndex++) {
-                builder.addFixedEdge(blockEdgeFromList.get(edgeIndex), blockEdgeToList.get(edgeIndex));
-            }
-        }
-        // With a genuine fixed loop, the block edges are not added:
-        // build() fails fast with the standard fixed dependency loop error.
         var innerGraph = builder.build(innerGraphDescriptor.graphCreator(),
                 innerGraphDescriptor.ignoreInconsistentSolutions());
         return new ListElementBlockVariableReferenceGraph<>(innerGraph, blockUpdater, listVariableMetaModel,
                 elementEntityClass, elementConsistencyState, elementDescriptorList, flaggingNotifier,
                 graphDescriptor.entities());
+    }
+
+    /** An edge ordering a block node against one of its list entity's variables. */
+    private record BlockEdge<Solution_>(GraphNode<Solution_> from, GraphNode<Solution_> to) {
+    }
+
+    /**
+     * Adds one block node per list entity.
+     *
+     * @return the edges ordering each block node after its entity's pre-chain variables
+     *         and before its post-chain variables
+     */
+    private static <Solution_> List<BlockEdge<Solution_>> addBlockNodesAndCollectEdges(
+            VariableReferenceGraphBuilder<Solution_> builder, Object[] entities, Class<?> ownerEntityClass,
+            VariableMetaModel<Solution_, ?, ?> listVariableMetaModel, ListElementBlockUpdater<Solution_> blockUpdater,
+            Set<VariableMetaModel<?, ?, ?>> preChainVariableIdSet,
+            List<VariableMetaModel<?, ?, ?>> postChainVariableIdList) {
+        var blockEdgeList = new ArrayList<BlockEdge<Solution_>>();
+        for (var owner : entities) {
+            if (!ownerEntityClass.isInstance(owner)) {
+                continue;
+            }
+            // Keyed by the list variable itself, so that a lookup by variable and entity finds it.
+            // AbstractVariableReferenceGraph's constructor replays afterVariableChanged for every
+            // variable an after processor was registered for, the list variable among them, which is
+            // what marks every block node changed for the initial walk.
+            builder.addVariableReferenceEntity(owner, List.of(blockUpdater));
+            var blockNode = builder.lookupOrError(listVariableMetaModel, owner);
+            // lookupOrNull: an extended model may declare the variable on a subclass only.
+            for (var preChainVariableId : preChainVariableIdSet) {
+                var preChainNode = builder.lookupOrNull(preChainVariableId, owner);
+                if (preChainNode != null) {
+                    blockEdgeList.add(new BlockEdge<>(preChainNode, blockNode));
+                }
+            }
+            for (var postChainVariableId : postChainVariableIdList) {
+                var postChainNode = builder.lookupOrNull(postChainVariableId, owner);
+                if (postChainNode != null) {
+                    blockEdgeList.add(new BlockEdge<>(blockNode, postChainNode));
+                }
+            }
+        }
+        return blockEdgeList;
+    }
+
+    /**
+     * The block edges overapproximate the per-element dependencies, so an entity level cycle that
+     * the arbitrary graph would only ever see as a solver-breakable runtime loop through the
+     * elements must not fail fast here.
+     *
+     * @return false if the edges were left out because they alone would form a dependency loop
+     */
+    private static <Solution_> boolean addBlockEdgesUnlessTheyLoop(VariableReferenceGraphBuilder<Solution_> builder,
+            List<BlockEdge<Solution_>> blockEdgeList) {
+        var fixedEdgeGraph = builder.newFixedEdgeGraph();
+        if (fixedEdgeGraph.commitChanges(new BitSet())) {
+            // A fixed loop the block edges played no part in; leaving them out lets build() report
+            // it with the variables actually at fault.
+            return true;
+        }
+        for (var blockEdge : blockEdgeList) {
+            fixedEdgeGraph.addEdge(blockEdge.from().graphNodeId(), blockEdge.to().graphNodeId());
+        }
+        if (fixedEdgeGraph.commitChanges(new BitSet())) {
+            return false;
+        }
+        for (var blockEdge : blockEdgeList) {
+            builder.addFixedEdge(blockEdge.from(), blockEdge.to());
+        }
+        return true;
     }
 
     private static <Solution_> boolean hasNoNonDeclarativeSourcesFromParent(
