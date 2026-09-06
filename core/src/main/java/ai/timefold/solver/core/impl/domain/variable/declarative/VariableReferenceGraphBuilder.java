@@ -32,6 +32,11 @@ public final class VariableReferenceGraphBuilder<Solution_> {
     final Map<Integer, Map<Object, GraphNode<Solution_>>> variableGroupIdToContainingNodeMap;
     final Map<VariableMetaModel<?, ?, ?>, List<ListElementSourceLocator>> listVariableReferenceToElementLocator;
     boolean isGraphFixed;
+    /**
+     * True when a planning list variable has its elements represented by one block node per
+     * list entity instead of a node each, so a list element source needs no per-element edges.
+     */
+    boolean excludesListElements;
 
     public VariableReferenceGraphBuilder(ChangedVariableNotifier<Solution_> changedVariableNotifier) {
         this.changedVariableNotifier = changedVariableNotifier;
@@ -45,6 +50,7 @@ public final class VariableReferenceGraphBuilder<Solution_> {
         entityToEntityId = new IdentityHashMap<>();
         listVariableReferenceToElementLocator = new HashMap<>();
         isGraphFixed = true;
+        excludesListElements = false;
     }
 
     /**

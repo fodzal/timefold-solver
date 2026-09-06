@@ -287,11 +287,12 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         var innerGraphDescriptor = new GraphDescriptor<>(graphDescriptor.consistencyTracker(), solutionDescriptor,
                 graphDescriptor.ignoreInconsistentSolutions(), new VariableReferenceGraphBuilder<>(flaggingNotifier),
                 graphDescriptor.entities(), graphDescriptor.graphCreator());
+        var builder = innerGraphDescriptor.variableReferenceGraphBuilder();
+        builder.excludesListElements = true;
         // Per-variable nodes for the non-element classes, whatever their structure:
         // grouped single-entity nodes could put a pre-chain variable in a node ordered
         // after the block node, breaking the pre-chain before block node guarantee.
-        populateArbitraryGraph(innerGraphDescriptor, innerDescriptorList, elementEntityClass);
-        var builder = innerGraphDescriptor.variableReferenceGraphBuilder();
+        populateArbitraryGraph(innerGraphDescriptor, innerDescriptorList);
 
         // Non-null: the detection requires the list entity to have declarative shadow variables.
         var ownerConsistencyState = graphDescriptor.consistencyTracker()
@@ -458,21 +459,14 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
     }
 
     private static <Solution_> VariableReferenceGraph buildArbitraryGraph(GraphDescriptor<Solution_> graphDescriptor) {
-        return buildArbitraryGraph(graphDescriptor,
-                graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors(), null);
-    }
-
-    private static <Solution_> VariableReferenceGraph buildArbitraryGraph(GraphDescriptor<Solution_> graphDescriptor,
-            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
-            @Nullable Class<?> excludedElementClass) {
-        populateArbitraryGraph(graphDescriptor, declarativeShadowVariableDescriptors, excludedElementClass);
+        populateArbitraryGraph(graphDescriptor,
+                graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors());
         return graphDescriptor.variableReferenceGraphBuilder().build(graphDescriptor.graphCreator(),
                 graphDescriptor.ignoreInconsistentSolutions());
     }
 
     private static <Solution_> void populateArbitraryGraph(GraphDescriptor<Solution_> graphDescriptor,
-            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
-            @Nullable Class<?> excludedElementClass) {
+            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors) {
         var variableIdToUpdater = EntityVariableUpdaterLookup.<Solution_> entityIndependentLookup();
 
         // Create graph node for each entity/declarative shadow variable pair.
@@ -484,18 +478,17 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 graphDescriptor,
                 declarativeShadowVariableDescriptors, variableIdToUpdater);
         populateVariableReferenceGraph(graphDescriptor, declarativeShadowVariableDescriptors,
-                declarativeShadowVariableToAliasMap, excludedElementClass);
+                declarativeShadowVariableToAliasMap);
     }
 
     private static <Solution_> void populateVariableReferenceGraph(
             GraphDescriptor<Solution_> graphDescriptor,
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
-            Map<VariableMetaModel<?, ?, ?>, Set<VariableSourceReference>> declarativeShadowVariableToAliasMap,
-            @Nullable Class<?> excludedElementClass) {
+            Map<VariableMetaModel<?, ?, ?>, Set<VariableSourceReference>> declarativeShadowVariableToAliasMap) {
         // Create variable processors for each declarative shadow variable descriptor
         for (var declarativeShadowVariable : declarativeShadowVariableDescriptors) {
             var fromVariableId = declarativeShadowVariable.getVariableMetaModel();
-            createSourceChangeProcessors(graphDescriptor, declarativeShadowVariable, fromVariableId, excludedElementClass);
+            createSourceChangeProcessors(graphDescriptor, declarativeShadowVariable, fromVariableId);
             var aliasSet = declarativeShadowVariableToAliasMap.get(fromVariableId);
             if (aliasSet != null) {
                 createAliasToVariableChangeProcessors(graphDescriptor.variableReferenceGraphBuilder(), aliasSet,
@@ -505,7 +498,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
 
         // Create the fixed edges in the graph
         createFixedVariableRelationEdges(graphDescriptor.variableReferenceGraphBuilder(), graphDescriptor.entities(),
-                declarativeShadowVariableDescriptors, excludedElementClass);
+                declarativeShadowVariableDescriptors);
     }
 
     private record GroupVariableUpdaterInfo<Solution_>(
@@ -642,15 +635,14 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
     private static <Solution_> VariableReferenceGraph buildArbitrarySingleEntityGraph(
             GraphDescriptor<Solution_> graphDescriptor) {
         populateArbitrarySingleEntityGraph(graphDescriptor,
-                graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors(), null);
+                graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors());
         return graphDescriptor.variableReferenceGraphBuilder().build(graphDescriptor.graphCreator(),
                 graphDescriptor.ignoreInconsistentSolutions());
     }
 
     private static <Solution_> void populateArbitrarySingleEntityGraph(
             GraphDescriptor<Solution_> graphDescriptor,
-            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
-            @Nullable Class<?> excludedElementClass) {
+            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors) {
         // Use a dependent lookup; if an entity does not use groups, then all variables can share the same node.
         // If the entity use groups, then variables must be grouped into their own nodes.
         var alignmentKeyMappers = new HashMap<VariableMetaModel<Solution_, ?, ?>, Function<Object, @Nullable Object>>();
@@ -680,7 +672,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 (entity, declarativeShadowVariable, variableId) -> variableIdToGroupedUpdater.get(variableId)
                         .getUpdatersForEntityVariable(entity, declarativeShadowVariable));
         populateVariableReferenceGraph(graphDescriptor, declarativeShadowVariableDescriptors,
-                declarativeShadowVariableToAliasMap, excludedElementClass);
+                declarativeShadowVariableToAliasMap);
     }
 
     private static <Solution_> Map<VariableMetaModel<?, ?, ?>, Set<VariableSourceReference>> createGraphNodes(
@@ -734,11 +726,10 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
     private static <Solution_> void createSourceChangeProcessors(
             GraphDescriptor<Solution_> graphDescriptor,
             DeclarativeShadowVariableDescriptor<Solution_> declarativeShadowVariable,
-            VariableMetaModel<Solution_, ?, ?> fromVariableId,
-            @Nullable Class<?> excludedElementClass) {
+            VariableMetaModel<Solution_, ?, ?> fromVariableId) {
         for (var source : declarativeShadowVariable.getSources()) {
             if (source.parentVariableType() == ParentVariableType.LIST_ELEMENT) {
-                createListElementSourceProcessors(graphDescriptor, source, fromVariableId, excludedElementClass);
+                createListElementSourceProcessors(graphDescriptor, source, fromVariableId);
                 continue;
             }
             var parentVariableList = new ArrayList<VariableSourceReference>();
@@ -823,8 +814,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
     private static <Solution_> void createListElementSourceProcessors(
             GraphDescriptor<Solution_> graphDescriptor,
             RootVariableSource<?, ?> source,
-            VariableMetaModel<Solution_, ?, ?> fromVariableId,
-            @Nullable Class<?> excludedElementClass) {
+            VariableMetaModel<Solution_, ?, ?> fromVariableId) {
         var listVariableId = Objects.requireNonNull(source.listVariableMetaModel());
         // Mark the target variable changed whenever its list variable changes,
         // since its dependency set (and possibly its value) changes with the list's contents.
@@ -838,7 +828,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                                 graph.markChanged(changed);
                             }
                         });
-        if (excludedElementClass != null) {
+        if (graphDescriptor.variableReferenceGraphBuilder().excludesListElements) {
             // The list's elements are not part of the graph; their block node marks the
             // target variable changed when an element changes, so no fan-in edges are needed,
             // and the graph stays fixed if nothing else needs dynamic edges.
@@ -907,8 +897,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
     private static <Solution_> void createFixedVariableRelationEdges(
             VariableReferenceGraphBuilder<Solution_> variableReferenceGraphBuilder,
             Object[] entities,
-            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
-            @Nullable Class<?> excludedElementClass) {
+            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors) {
         for (var entity : entities) {
             for (var declarativeShadowVariableDescriptor : declarativeShadowVariableDescriptors) {
                 var entityClass = declarativeShadowVariableDescriptor.getEntityDescriptor().getEntityClass();
@@ -925,7 +914,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                             // the graph is built and are removed/added as it changes during solving,
                             // so they must not be treated as fixed by the fixed-loop fail-fast.
                             var isListElementSource = sourceRoot.parentVariableType() == ParentVariableType.LIST_ELEMENT;
-                            if (isListElementSource && excludedElementClass != null) {
+                            if (isListElementSource && variableReferenceGraphBuilder.excludesListElements) {
                                 // The list's elements are not part of the graph;
                                 // their block node covers this source without per-element edges.
                                 break;
