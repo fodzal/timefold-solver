@@ -16,7 +16,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * Updates the declarative shadow variables of a planning list variable's elements,
  * which are excluded from the variable reference graph and represented by one block node
- * per list entity instead; see {@link GraphStructure.GraphStructureAndDirection#blockedElementClass()}.
+ * per list entity instead; see {@link GraphStructure#LIST_ELEMENT_BLOCK}.
  * <p>
  * A single instance backs every list entity's block node.
  * When a block node is processed, {@link #update(Object, boolean, ChangedVariableNotifier)}

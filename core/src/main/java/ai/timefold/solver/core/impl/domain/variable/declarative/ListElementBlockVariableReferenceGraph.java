@@ -14,7 +14,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * A variable reference graph that excludes a planning list variable's elements from the graph
  * and represents each list entity's chain by a single block node instead;
- * see {@link GraphStructure.GraphStructureAndDirection#blockedElementClass()}.
+ * see {@link GraphStructure#LIST_ELEMENT_BLOCK}.
  * <p>
  * The graph itself covers everything else and is built by the normal machinery,
  * with fixed edges from each entity's pre-chain variables to its block node
@@ -25,6 +25,11 @@ import org.jspecify.annotations.Nullable;
  * it records the elements whose source variables changed and the list variables' change ranges,
  * classifies them into per-entity dirty ranges,
  * and marks the dirty entities' block nodes before delegating the update.
+ * <p>
+ * The classification runs before the delegated update, and recomputes the elements that left their
+ * list along the way; those writes come back here through the score director. The graph's own
+ * reentrancy guard does not cover that window, since it only spans the update it delegates to,
+ * hence {@link #isProcessing}: without it the classification would add to the list it is iterating.
  */
 @NullMarked
 final class ListElementBlockVariableReferenceGraph<Solution_> implements VariableReferenceGraph {
