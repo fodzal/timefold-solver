@@ -128,11 +128,6 @@ public final class ListElementBlockVariableReferenceGraph<Solution_> implements 
             blockUpdater.recordChangedElement(elementList.get(fromIndex));
             blockUpdater.recordChangedElement(elementList.get(toIndex - 1));
         }
-        // Stands in for the marking the graph does for a non-blocked model, at the same event:
-        // the block node skips the list element locators, hence also the mark that comes with them.
-        // Without it, removing the list's last element would leave no element to walk and no edge
-        // to the entity, so nothing would recompute its post-chain variables.
-        blockUpdater.recordStructuralChange(entity);
     }
 
     @Override

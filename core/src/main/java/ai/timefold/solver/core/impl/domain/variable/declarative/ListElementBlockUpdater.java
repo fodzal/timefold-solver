@@ -1,7 +1,6 @@
 package ai.timefold.solver.core.impl.domain.variable.declarative;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -59,7 +58,6 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
     private final IdentityHashMap<Object, Object> ownerToDirtyChainStart;
     private final IdentityHashMap<Object, Object> ownerToDirtyChainEnd;
     private final Set<Object> wholeChainOwnerSet;
-    private final Set<Object> structuralChangeOwnerSet;
 
     @SuppressWarnings("unchecked")
     ListElementBlockUpdater(
@@ -83,7 +81,6 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
         this.changedElementList = new ArrayList<>();
         this.ownerToDirtyChainStart = new IdentityHashMap<>();
         this.ownerToDirtyChainEnd = new IdentityHashMap<>();
-        this.structuralChangeOwnerSet = Collections.newSetFromMap(new IdentityHashMap<>());
 
         this.elementUpdaters = new VariableUpdaterInfo[sortedElementDescriptorList.size()];
         var updaterId = 0;
@@ -121,11 +118,10 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
         var dirtyChainStart = ownerToDirtyChainStart.remove(owner);
         var dirtyChainEnd = ownerToDirtyChainEnd.remove(owner);
         var walkWholeChain = wholeChainOwnerSet.remove(owner);
-        var isStructurallyChanged = structuralChangeOwnerSet.remove(owner);
         if (isEntityInconsistent) {
             // The owner is part of a dependency loop the solver may break later;
             // its elements read its pre-chain variables, so they are inconsistent with it.
-            return markChainInconsistent(owner, changedVariableNotifier) || isStructurallyChanged;
+            return markChainInconsistent(owner, changedVariableNotifier);
         }
         var firstElement = ownerToFirstElement.apply(owner);
         if (firstElement != null && !elementConsistencyState.isEntityConsistent(firstElement)) {
@@ -138,10 +134,7 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
                 && (chainStart == null || chainOrderComparator.compare(firstElement, chainStart) < 0)) {
             chainStart = firstElement;
         }
-        var anyElementChanged = walkChain(chainStart, dirtyChainEnd, walkWholeChain, changedVariableNotifier);
-        // A structural list change (e.g. a removed element) changes the post-chain variables'
-        // dependency set even when no element value changed, so it always propagates.
-        return anyElementChanged || isStructurallyChanged;
+        return walkChain(chainStart, dirtyChainEnd, walkWholeChain, changedVariableNotifier);
     }
 
     private boolean walkChain(@Nullable Object chainStart, @Nullable Object dirtyChainEnd, boolean walkWholeChain,
@@ -195,14 +188,6 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
     }
 
     /**
-     * Records that the given entity's list changed structurally,
-     * so its post-chain variables must be recomputed even when no element value changes.
-     */
-    void recordStructuralChange(Object owner) {
-        structuralChangeOwnerSet.add(owner);
-    }
-
-    /**
      * Classifies the recorded elements into per-owner dirty ranges and feeds each dirty owner
      * to the given consumer, so its block node can be marked changed.
      * An unassigned element is recomputed here rather than by a block node, having no list entity;
@@ -237,9 +222,6 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
         for (var owner : ownerToDirtyChainStart.keySet()) {
             dirtyOwnerConsumer.accept(owner);
         }
-        for (var owner : structuralChangeOwnerSet) {
-            dirtyOwnerConsumer.accept(owner);
-        }
     }
 
     /**
@@ -250,6 +232,5 @@ public final class ListElementBlockUpdater<Solution_> implements VariableUpdater
         ownerToDirtyChainStart.clear();
         ownerToDirtyChainEnd.clear();
         wholeChainOwnerSet.clear();
-        structuralChangeOwnerSet.clear();
     }
 }

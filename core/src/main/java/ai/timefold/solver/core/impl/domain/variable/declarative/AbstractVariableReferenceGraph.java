@@ -219,6 +219,10 @@ public abstract sealed class AbstractVariableReferenceGraph<Solution_, ChangeTra
             throw new IllegalStateException("Impossible state: list variable changed during shadow variable update.");
         }
         updateListElementEdges(variableReference, entity, elementList, fromIndex, toIndex, true);
+        // The list's own dependents changed, even when the range is empty because an element was
+        // removed, so their processors run for every list change and not only at construction.
+        processEntity(variableReferenceToAfterProcessor.getOrDefault(variableReference, Collections.emptyList()),
+                entity);
     }
 
     @SuppressWarnings("ForLoopReplaceableByForEach")
@@ -254,13 +258,6 @@ public abstract sealed class AbstractVariableReferenceGraph<Solution_, ChangeTra
                         removeEdge(from, to);
                     }
                 }
-            }
-            if (isAdd) {
-                // The dependency set changed even if the range is empty (e.g. an element was removed),
-                // so the target variable must always be recomputed.
-                // At graph construction, the same is guaranteed by the after processor registered in
-                // DefaultShadowVariableSessionFactory.createListElementSourceProcessors().
-                markChanged(to);
             }
         }
     }
