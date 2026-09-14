@@ -36,6 +36,10 @@ import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMult
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_element_sourced.TestdataElementSourcedSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_element_sourced.TestdataElementSourcedVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_element_sourced.TestdataElementSourcedVisit;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataExtendedPriorityVisit;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataExtendedSolution;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataExtendedVehicle;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataExtendedVisit;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonOwnerDepot;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonOwnerSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonOwnerVehicle;
@@ -246,5 +250,18 @@ class GraphStructureTest {
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataSolution.buildSolutionDescriptor()))
                 .hasFieldOrPropertyWithValue("structure", EMPTY);
+    }
+
+    @Test
+    void multiEntityChainWithDeclarativeVisitSubclass() {
+        var vehicle = new TestdataExtendedVehicle("A", 0);
+        var visit = new TestdataExtendedVisit("v1", 1);
+        var priorityVisit = new TestdataExtendedPriorityVisit("p1", 1, 10);
+        // The block node's walk applies every element updater to every element,
+        // so a declarative variable declared on a visit subclass falls back to the arbitrary graph.
+        assertThat(GraphStructure.determineGraphStructure(
+                TestdataExtendedSolution.buildSolutionDescriptor(), vehicle, visit, priorityVisit))
+                .hasFieldOrPropertyWithValue("structure", ARBITRARY)
+                .hasFieldOrPropertyWithValue("blockedElementClass", null);
     }
 }

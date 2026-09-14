@@ -14,6 +14,10 @@ import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMult
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVisit;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataExtendedPriorityVisit;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataExtendedSolution;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataExtendedVehicle;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataExtendedVisit;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataFactCycleSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataFactCycleVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataFactCycleVisit;
@@ -345,6 +349,43 @@ class ListElementBlockShadowVariableTest {
     @Test
     void solvingStaysAtFixedPointWithPreChainReadingElements() {
         assertShadowsAreAtFixedPoint(solve(generateSolution(true)));
+    }
+
+    /**
+     * A visit subclass declares a declarative shadow variable the other visits of the same list
+     * do not have, so the model falls back to the arbitrary graph, whose nodes are per entity
+     * and variable; the block node's walk would apply the subclass's updater to every element.
+     */
+    @Test
+    void declarativeVisitSubclassFallsBack() {
+        var v1 = new TestdataExtendedVisit("v1", 1);
+        var p2 = new TestdataExtendedPriorityVisit("p2", 2, 10);
+        var v3 = new TestdataExtendedVisit("v3", 3);
+        var vehicle = new TestdataExtendedVehicle("A", 0);
+        vehicle.setVisits(new ArrayList<>(List.of(v1, p2, v3)));
+
+        var solution = new TestdataExtendedSolution();
+        solution.setVehicles(List.of(vehicle));
+        solution.setVisits(List.of(v1, p2, v3));
+
+        var solutionMetaModel = TestdataExtendedSolution.buildMetaModel();
+        var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataExtendedVehicle.class)
+                .listVariable("visits", TestdataExtendedVisit.class);
+
+        var context = MoveTester.build(solutionMetaModel).using(solution);
+        assertThat(v1.getEndServiceTime()).isEqualTo(1);
+        assertThat(p2.getEndServiceTime()).isEqualTo(3);
+        assertThat(p2.getSlack()).isEqualTo(7);
+        assertThat(v3.getEndServiceTime()).isEqualTo(6);
+        assertThat(vehicle.getEndTime()).isEqualTo(6);
+
+        // Swapping the priority visit to the head of the route shifts it and its own slack.
+        context.execute(Moves.swap(listVariableMetaModel, vehicle, 0, vehicle, 1));
+        assertThat(p2.getEndServiceTime()).isEqualTo(2);
+        assertThat(p2.getSlack()).isEqualTo(8);
+        assertThat(v1.getEndServiceTime()).isEqualTo(3);
+        assertThat(v3.getEndServiceTime()).isEqualTo(6);
+        assertThat(vehicle.getEndTime()).isEqualTo(6);
     }
 
     private static TestdataMultiEntityChainSolution solve(TestdataMultiEntityChainSolution problem) {

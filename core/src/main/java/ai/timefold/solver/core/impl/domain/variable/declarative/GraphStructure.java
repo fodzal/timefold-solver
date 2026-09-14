@@ -202,7 +202,8 @@ public enum GraphStructure {
                     if (parentMetaModel == null) {
                         parentMetaModel = sourceParentMetaModel;
                         direction = parentVariableType;
-                        // The class declaring the directional parent, so extended element classes are covered.
+                        // The class declaring the directional parent; the elements may be of any
+                        // subclass of it, as long as none of them declares a declarative variable.
                         elementEntityClass = sourceParentMetaModel.entity().type();
                     } else if (!parentMetaModel.equals(sourceParentMetaModel)
                             || direction != parentVariableType) {
@@ -226,14 +227,17 @@ public enum GraphStructure {
         var hasOwnerDescriptors = false;
         for (var descriptor : declarativeShadowVariableDescriptors) {
             var entityClass = descriptor.getEntityDescriptor().getEntityClass();
-            if (elementEntityClass.isAssignableFrom(entityClass)) {
+            if (entityClass == elementEntityClass) {
                 if (descriptor.getAlignmentKeyMap() != null) {
                     // The block node walks one chain at a time,
                     // which an alignment key's grouped updater contradicts.
                     return null;
                 }
-            } else if (entityClass.isAssignableFrom(elementEntityClass)) {
-                // A declarative superclass of the elements would be entangled with the block.
+            } else if (elementEntityClass.isAssignableFrom(entityClass)
+                    || entityClass.isAssignableFrom(elementEntityClass)) {
+                // The block node's walk applies every element updater to every element,
+                // so a declarative variable declared elsewhere in the element hierarchy
+                // would be applied to elements that do not have it.
                 return null;
             } else if (entityClass.isAssignableFrom(ownerEntityClass)) {
                 hasOwnerDescriptors = true;
@@ -262,7 +266,7 @@ public enum GraphStructure {
             }
         }
         for (var descriptor : declarativeShadowVariableDescriptors) {
-            var isElementSource = elementEntityClass.isAssignableFrom(descriptor.getEntityDescriptor().getEntityClass());
+            var isElementSource = descriptor.getEntityDescriptor().getEntityClass() == elementEntityClass;
             for (var variableSource : descriptor.getSources()) {
                 var parentVariableType = variableSource.parentVariableType();
                 if (isElementSource) {
