@@ -251,8 +251,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             }
         }
         var sortedElementDescriptors = topologicallySortedDeclarativeShadowVariables(elementDescriptorList);
-        @SuppressWarnings("unchecked")
-        var listVariableMetaModel = (VariableMetaModel<Solution_, ?, ?>) listVariableDescriptor.getVariableMetaModel();
+        var listVariableMetaModel = listVariableDescriptor.<Object, Object> getVariableMetaModel();
 
         var changedVariableNotifier = graphDescriptor.changedVariableNotifier();
         // Non-null: the detection requires the list entity to have declarative shadow variables.
