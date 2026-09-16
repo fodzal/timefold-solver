@@ -370,20 +370,21 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
     }
 
     /**
-     * The block edges overapproximate the per-element dependencies, so an entity level cycle that
-     * the arbitrary graph would only ever see as a solver-breakable runtime loop through the
-     * elements must not fail fast here.
+     * Adds the block edges to the builder as
+     * {@link VariableReferenceGraphBuilder#addFixedEdge(GraphNode, GraphNode) fixed} edges,
+     * unless they close a dependency loop.
+     * <p>
+     * Such a loop runs through the list's elements, which the arbitrary graph depends on through
+     * the dynamic edges of a {@link ParentVariableType#LIST_ELEMENT} source, where a move can
+     * break it. The block node has no such edges, since it stands for every element of its list
+     * entity, so failing fast on the loop would reject a model the arbitrary graph solves.
      *
-     * @return false if the edges were left out because they alone would form a dependency loop
+     * @return true to keep building the block graph, false to fall back to the arbitrary graph,
+     *         which fails the build fast itself on a fixed loop.
      */
     private static <Solution_> boolean addBlockEdgesUnlessTheyLoop(VariableReferenceGraphBuilder<Solution_> builder,
             List<BlockEdge<Solution_>> blockEdgeList) {
         var fixedEdgeGraph = builder.newFixedEdgeGraph();
-        if (fixedEdgeGraph.commitChanges(new BitSet())) {
-            // A fixed loop the block edges played no part in; leaving them out lets build() report
-            // it with the variables actually at fault.
-            return true;
-        }
         for (var blockEdge : blockEdgeList) {
             fixedEdgeGraph.addEdge(blockEdge.from().graphNodeId(), blockEdge.to().graphNodeId());
         }
