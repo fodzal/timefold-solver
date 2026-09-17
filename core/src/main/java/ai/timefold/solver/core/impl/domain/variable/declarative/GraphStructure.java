@@ -226,14 +226,17 @@ public enum GraphStructure {
         }
         var hasOwnerDescriptors = false;
         for (var descriptor : declarativeShadowVariableDescriptors) {
+            if (descriptor.getAlignmentKeyMap() != null) {
+                // The block node updates one entity at a time, both when it walks a chain
+                // and when it recomputes the list entity's post-chain variables,
+                // which an alignment key's grouped updater contradicts.
+                return null;
+            }
             var entityClass = descriptor.getEntityDescriptor().getEntityClass();
             if (entityClass == elementEntityClass) {
-                if (descriptor.getAlignmentKeyMap() != null) {
-                    // The block node walks one chain at a time,
-                    // which an alignment key's grouped updater contradicts.
-                    return null;
-                }
-            } else if (elementEntityClass.isAssignableFrom(entityClass)
+                continue;
+            }
+            if (elementEntityClass.isAssignableFrom(entityClass)
                     || entityClass.isAssignableFrom(elementEntityClass)) {
                 // The block node's walk applies every element updater to every element,
                 // so a declarative variable declared elsewhere in the element hierarchy
@@ -241,11 +244,6 @@ public enum GraphStructure {
                 return null;
             } else if (entityClass.isAssignableFrom(ownerEntityClass)) {
                 hasOwnerDescriptors = true;
-                if (descriptor.getAlignmentKeyMap() != null) {
-                    // The block node recomputes the list entity's post-chain variables one entity
-                    // at a time, which an alignment key's grouped updater contradicts.
-                    return null;
-                }
             }
         }
         if (!hasOwnerDescriptors) {

@@ -18,6 +18,9 @@ import ai.timefold.solver.core.testdomain.shadow.extended.TestdataDeclarativeExt
 import ai.timefold.solver.core.testdomain.shadow.extended.TestdataDeclarativeExtendedSubclassValue;
 import ai.timefold.solver.core.testdomain.shadow.follower.TestdataFollowerEntity;
 import ai.timefold.solver.core.testdomain.shadow.follower.TestdataFollowerSolution;
+import ai.timefold.solver.core.testdomain.shadow.list_element.TestdataAlignedListElementEntity;
+import ai.timefold.solver.core.testdomain.shadow.list_element.TestdataAlignedListElementSolution;
+import ai.timefold.solver.core.testdomain.shadow.list_element.TestdataAlignedListElementValue;
 import ai.timefold.solver.core.testdomain.shadow.list_element.TestdataListElementEntity;
 import ai.timefold.solver.core.testdomain.shadow.list_element.TestdataListElementSolution;
 import ai.timefold.solver.core.testdomain.shadow.list_element.TestdataListElementValue;
@@ -171,6 +174,18 @@ class GraphStructureTest {
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataMixedListElementSolution.buildSolutionDescriptor(), entity, value))
                 .hasFieldOrPropertyWithValue("structure", ARBITRARY);
+    }
+
+    @Test
+    void listElementStructureWithAlignmentKey() {
+        var entity = new TestdataAlignedListElementEntity("e1");
+        var value = new TestdataAlignedListElementValue("v1", "g1");
+        // An alignment key updates every entity of its group at once,
+        // which the block node's entity at a time updates cannot do.
+        assertThat(GraphStructure.determineGraphStructure(
+                TestdataAlignedListElementSolution.buildSolutionDescriptor(), entity, value))
+                .hasFieldOrPropertyWithValue("structure", ARBITRARY)
+                .hasFieldOrPropertyWithValue("blockedElementClass", null);
     }
 
     @Test
