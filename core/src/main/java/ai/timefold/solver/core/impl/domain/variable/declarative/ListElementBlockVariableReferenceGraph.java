@@ -4,6 +4,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
 
 import ai.timefold.solver.core.api.score.analysis.VariableLoop;
 import ai.timefold.solver.core.preview.api.domain.metamodel.VariableMetaModel;
@@ -25,6 +26,8 @@ import org.jspecify.annotations.Nullable;
  * it records the elements whose source variables changed and the list variables' change ranges,
  * classifies them into per-entity dirty ranges,
  * and marks the dirty entities' block nodes before delegating the update.
+ * It also marks the list entity's post-chain variables changed on a list change,
+ * which the graph derives from the list element locators the block node skips.
  * <p>
  * The classification runs before the delegated update, and recomputes the elements that left their
  * list along the way; those writes come back here through the score director. The graph's own
@@ -45,6 +48,11 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
      * {@link VariableMetaModel}, whose equals is expensive, and this lookup runs per changed element.
      */
     private final Map<Object, GraphNode<Solution_>> ownerToBlockNodeMap;
+    /**
+     * The list variable's after processors, which mark the list entity's post-chain variables changed.
+     * Hoisted at construction for the same reason as {@link #ownerToBlockNodeMap}.
+     */
+    private final List<BiConsumer<AbstractVariableReferenceGraph<Solution_, ?>, Object>> listVariableAfterProcessorList;
 
     private boolean isProcessing;
 
@@ -69,6 +77,8 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
         this.changedVariableNotifier = changedVariableNotifier;
         this.ownerToBlockNodeMap = innerNodeGraph == null ? Map.of()
                 : innerNodeGraph.variableReferenceToContainingNodeMap.getOrDefault(listVariableMetaModel, Map.of());
+        this.listVariableAfterProcessorList = innerNodeGraph == null ? List.of()
+                : innerNodeGraph.variableReferenceToAfterProcessor.getOrDefault(listVariableMetaModel, List.of());
         this.isProcessing = false;
 
         this.monitoredSourceVariableSet = new HashSet<>();
@@ -133,6 +143,7 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
             blockUpdater.recordChangedElement(elementList.get(fromIndex));
             blockUpdater.recordChangedElement(elementList.get(toIndex - 1));
         }
+        markPostChainVariablesChanged(entity);
     }
 
     @Override
@@ -158,6 +169,24 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
         // A loop that closes through a chain runs through the entity's block node,
         // which the graph reports as its list variable; its elements follow their entity.
         return innerGraph.getVariableLoops();
+    }
+
+    /**
+     * Stands in for the mark the graph derives from the list element locators, which the block node
+     * skips along with the edges. Without it, removing the list's last element would leave no element
+     * to walk and no edge to the entity, so nothing would recompute its post-chain variables.
+     */
+    @SuppressWarnings("ForLoopReplaceableByForEach")
+    private void markPostChainVariablesChanged(Object entity) {
+        var nodeGraph = innerNodeGraph;
+        if (nodeGraph == null) {
+            return;
+        }
+        // Avoid creation of iterators on the hot path, as the graph does.
+        var processorCount = listVariableAfterProcessorList.size();
+        for (var i = 0; i < processorCount; i++) {
+            listVariableAfterProcessorList.get(i).accept(nodeGraph, entity);
+        }
     }
 
     private void markBlockNodeChanged(Object owner) {
