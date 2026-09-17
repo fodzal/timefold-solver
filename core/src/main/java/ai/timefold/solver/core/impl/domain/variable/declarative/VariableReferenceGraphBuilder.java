@@ -29,7 +29,7 @@ public final class VariableReferenceGraphBuilder<Solution_> {
     final Map<GraphNode<Solution_>, List<GraphNode<Solution_>>> fixedEdges;
     final Map<GraphNode<Solution_>, List<GraphNode<Solution_>>> initialDynamicEdges;
     final Map<VariableMetaModel<?, ?, ?>, Map<Object, GraphNode<Solution_>>> variableReferenceToContainingNodeMap;
-    final Map<Integer, Map<Object, GraphNode<Solution_>>> variableGroupIdToContainingNodeMap;
+    final Map<Object, Map<Object, GraphNode<Solution_>>> nodeGroupKeyToContainingNodeMap;
     final Map<VariableMetaModel<?, ?, ?>, List<ListElementSourceLocator>> listVariableReferenceToElementLocator;
     boolean isGraphFixed;
     /**
@@ -42,7 +42,7 @@ public final class VariableReferenceGraphBuilder<Solution_> {
         this.changedVariableNotifier = changedVariableNotifier;
         nodeList = new ArrayList<>();
         variableReferenceToContainingNodeMap = new HashMap<>();
-        variableGroupIdToContainingNodeMap = new HashMap<>();
+        nodeGroupKeyToContainingNodeMap = new HashMap<>();
         variableReferenceToBeforeProcessor = new HashMap<>();
         variableReferenceToAfterProcessor = new HashMap<>();
         fixedEdges = new HashMap<>();
@@ -76,13 +76,13 @@ public final class VariableReferenceGraphBuilder<Solution_> {
     public <Entity_> void addVariableReferenceEntity(Entity_ entity,
             List<? extends VariableUpdater<Solution_>> uncopiedVariableReferences) {
         List<VariableUpdater<Solution_>> variableReferences = List.copyOf(uncopiedVariableReferences);
-        var groupId = variableReferences.get(0).groupId();
+        var nodeGroupKey = variableReferences.get(0).nodeGroupKey();
         var isGroup = variableReferences.get(0).groupEntities() != null;
         var entityRepresentative = entity;
         if (isGroup) {
             entityRepresentative = (Entity_) variableReferences.get(0).groupEntities()[0];
         }
-        var instanceMap = variableGroupIdToContainingNodeMap.get(groupId);
+        var instanceMap = nodeGroupKeyToContainingNodeMap.get(nodeGroupKey);
 
         var instance = instanceMap == null ? null : instanceMap.get(entityRepresentative);
         if (instance != null) {
@@ -90,7 +90,7 @@ public final class VariableReferenceGraphBuilder<Solution_> {
         }
         if (instanceMap == null) {
             instanceMap = new IdentityHashMap<>();
-            variableGroupIdToContainingNodeMap.put(groupId, instanceMap);
+            nodeGroupKeyToContainingNodeMap.put(nodeGroupKey, instanceMap);
         }
 
         var entityId = entityToEntityId.computeIfAbsent(entityRepresentative, ignored -> entityToEntityId.size());

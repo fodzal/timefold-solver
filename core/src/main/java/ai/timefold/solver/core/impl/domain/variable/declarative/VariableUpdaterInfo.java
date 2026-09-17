@@ -44,6 +44,11 @@ public record VariableUpdaterInfo<Solution_>(
     }
 
     @Override
+    public Object nodeGroupKey() {
+        return groupId;
+    }
+
+    @Override
     public boolean update(Object entity, boolean isEntityInconsistent,
             ChangedVariableNotifier<Solution_> changedVariableNotifier) {
         if (isEntityInconsistent) {

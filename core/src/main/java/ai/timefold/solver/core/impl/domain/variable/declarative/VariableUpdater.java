@@ -23,7 +23,12 @@ public sealed interface VariableUpdater<Solution_> permits VariableUpdaterInfo, 
      */
     VariableMetaModel<Solution_, ?, ?> id();
 
-    int groupId();
+    /**
+     * The bucket {@link VariableReferenceGraphBuilder#addVariableReferenceEntity} groups nodes by:
+     * it creates one node per key and entity, so the updaters sharing a key on the same entity
+     * share a node.
+     */
+    Object nodeGroupKey();
 
     /**
      * The aligned entities all receiving this updater's value, or null when the updater

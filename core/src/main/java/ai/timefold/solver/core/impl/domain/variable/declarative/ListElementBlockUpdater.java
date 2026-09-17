@@ -32,13 +32,6 @@ import org.jspecify.annotations.Nullable;
 @NullMarked
 final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Solution_> {
 
-    /**
-     * {@link DefaultShadowVariableSessionFactory#getGroupVariableUpdaterInfoMap} allocates the other
-     * updaters' group ids by counting up from zero, so a negative id gives the block nodes a bucket
-     * of their own in {@link VariableReferenceGraphBuilder#addVariableReferenceEntity}.
-     */
-    private static final int BLOCK_GROUP_ID = -1;
-
     private final VariableMetaModel<Solution_, ?, ?> listVariableMetaModel;
     private final EntityConsistencyState<Solution_, Object> ownerConsistencyState;
     private final EntityConsistencyState<Solution_, Object> elementConsistencyState;
@@ -94,8 +87,10 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
     }
 
     @Override
-    public int groupId() {
-        return BLOCK_GROUP_ID;
+    public Object nodeGroupKey() {
+        // One block node per list entity, which is also how the graph looks them up;
+        // a metamodel never collides with the other updaters, whose keys are their group ids.
+        return listVariableMetaModel;
     }
 
     @Override
