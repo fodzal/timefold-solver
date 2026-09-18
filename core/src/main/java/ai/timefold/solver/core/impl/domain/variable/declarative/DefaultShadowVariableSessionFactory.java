@@ -646,15 +646,8 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
 
     private static <Solution_> VariableReferenceGraph buildArbitrarySingleEntityGraph(
             GraphDescriptor<Solution_> graphDescriptor) {
-        populateArbitrarySingleEntityGraph(graphDescriptor,
-                graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors());
-        return graphDescriptor.variableReferenceGraphBuilder().build(graphDescriptor.graphCreator(),
-                graphDescriptor.ignoreInconsistentSolutions());
-    }
-
-    private static <Solution_> void populateArbitrarySingleEntityGraph(
-            GraphDescriptor<Solution_> graphDescriptor,
-            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors) {
+        var declarativeShadowVariableDescriptors =
+                graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors();
         // Use a dependent lookup; if an entity does not use groups, then all variables can share the same node.
         // If the entity use groups, then variables must be grouped into their own nodes.
         var alignmentKeyMappers = new HashMap<VariableMetaModel<Solution_, ?, ?>, Function<Object, @Nullable Object>>();
@@ -685,6 +678,8 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                         .getUpdatersForEntityVariable(entity, declarativeShadowVariable));
         populateVariableReferenceGraph(graphDescriptor, declarativeShadowVariableDescriptors,
                 declarativeShadowVariableToAliasMap);
+        return graphDescriptor.variableReferenceGraphBuilder().build(graphDescriptor.graphCreator(),
+                graphDescriptor.ignoreInconsistentSolutions());
     }
 
     private static <Solution_> Map<VariableMetaModel<?, ?, ?>, Set<VariableSourceReference>> createGraphNodes(
