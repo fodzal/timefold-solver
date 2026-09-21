@@ -24,13 +24,11 @@ public sealed interface VariableUpdater<Solution_> permits VariableUpdaterInfo, 
     VariableMetaModel<Solution_, ?, ?> id();
 
     /**
-     * The id of the node group this updater belongs to:
-     * {@link VariableReferenceGraphBuilder#addVariableReferenceEntity} creates one node per id and
-     * entity, so the updaters sharing an id on the same entity share a node.
-     * Null when the updater's node is added once per entity and has nothing to deduplicate.
+     * The bucket {@link VariableReferenceGraphBuilder#addVariableReferenceEntity} groups nodes by:
+     * it creates one node per key and entity, so the updaters sharing a key on the same entity
+     * share a node.
      */
-    @Nullable
-    Integer nodeGroupId();
+    Object nodeGroupKey();
 
     /**
      * The aligned entities all receiving this updater's value, or null when the updater

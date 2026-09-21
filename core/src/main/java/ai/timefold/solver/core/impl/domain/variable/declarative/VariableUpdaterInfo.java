@@ -44,7 +44,7 @@ public record VariableUpdaterInfo<Solution_>(
     }
 
     @Override
-    public Integer nodeGroupId() {
+    public Object nodeGroupKey() {
         return groupId;
     }
 

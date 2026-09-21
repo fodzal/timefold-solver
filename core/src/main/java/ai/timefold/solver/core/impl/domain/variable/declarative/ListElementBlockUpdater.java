@@ -87,9 +87,10 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
     }
 
     @Override
-    public @Nullable Integer nodeGroupId() {
-        // One block node per list entity, so there is nothing to deduplicate.
-        return null;
+    public Object nodeGroupKey() {
+        // One block node per list entity, which is also how the graph looks them up;
+        // a metamodel never collides with the other updaters, whose keys are their group ids.
+        return listVariableMetaModel;
     }
 
     @Override
