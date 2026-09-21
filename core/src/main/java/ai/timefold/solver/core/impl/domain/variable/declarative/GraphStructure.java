@@ -174,20 +174,12 @@ public enum GraphStructure {
     }
 
     /**
-     * Non-null if the planning list variable's elements can be excluded from the variable
-     * reference graph and represented by a per-entity block node instead;
-     * see {@link GraphStructureAndDirection#blockedElementClass()}.
-     * Only the element class's sources and the references towards the element class are
-     * checked here: the rest of the model is covered by the graph, whatever its structure.
+     * Non-null if every previous/next directional parent among the descriptors' sources agrees
+     * on a single source variable and direction, which fixes the block's element entity class
+     * and walk direction.
      */
-    private static <Solution_> @Nullable ListElementBlockAndDirection determineListElementBlock(
-            SolutionDescriptor<Solution_> solutionDescriptor,
+    private static <Solution_> @Nullable ListElementBlockAndDirection findChainDirection(
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors) {
-        var listVariableDescriptor = solutionDescriptor.getListVariableDescriptor();
-        if (listVariableDescriptor == null) {
-            return null;
-        }
-        // The element class is the entity class of the single previous or next directional parent.
         VariableMetaModel<?, ?, ?> parentMetaModel = null;
         ParentVariableType direction = null;
         Class<?> elementEntityClass = null;
@@ -213,6 +205,28 @@ public enum GraphStructure {
         if (elementEntityClass == null || direction == null) {
             return null;
         }
+        return new ListElementBlockAndDirection(elementEntityClass, direction);
+    }
+
+    /**
+     * Non-null if the planning list variable's elements can be excluded from the variable
+     * reference graph and represented by a per-entity block node instead;
+     * see {@link GraphStructureAndDirection#blockedElementClass()}.
+     * Only the element class's sources and the references towards the element class are
+     * checked here: the rest of the model is covered by the graph, whatever its structure.
+     */
+    private static <Solution_> @Nullable ListElementBlockAndDirection determineListElementBlock(
+            SolutionDescriptor<Solution_> solutionDescriptor,
+            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors) {
+        var listVariableDescriptor = solutionDescriptor.getListVariableDescriptor();
+        if (listVariableDescriptor == null) {
+            return null;
+        }
+        var chainDirection = findChainDirection(declarativeShadowVariableDescriptors);
+        if (chainDirection == null) {
+            return null;
+        }
+        var elementEntityClass = chainDirection.elementEntityClass();
         var ownerEntityDescriptor = listVariableDescriptor.getEntityDescriptor();
         var ownerEntityClass = ownerEntityDescriptor.getEntityClass();
         if (!elementEntityClass.isAssignableFrom(listVariableDescriptor.getElementType())
@@ -308,7 +322,7 @@ public enum GraphStructure {
                 }
             }
         }
-        return new ListElementBlockAndDirection(elementEntityClass, direction);
+        return chainDirection;
     }
 
     private static <Solution_> boolean doEntitiesUseDeclarativeShadowVariables(
