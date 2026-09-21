@@ -213,7 +213,8 @@ public enum GraphStructure {
         if (elementEntityClass == null || direction == null) {
             return null;
         }
-        var ownerEntityClass = listVariableDescriptor.getEntityDescriptor().getEntityClass();
+        var ownerEntityDescriptor = listVariableDescriptor.getEntityDescriptor();
+        var ownerEntityClass = ownerEntityDescriptor.getEntityClass();
         if (!elementEntityClass.isAssignableFrom(listVariableDescriptor.getElementType())
                 || ownerEntityClass.isAssignableFrom(elementEntityClass)
                 || elementEntityClass.isAssignableFrom(ownerEntityClass)) {
@@ -221,7 +222,6 @@ public enum GraphStructure {
             // so the element class must cover the list's elements and be distinct from the list entity.
             return null;
         }
-        var hasOwnerDescriptors = false;
         for (var descriptor : declarativeShadowVariableDescriptors) {
             if (descriptor.getAlignmentKeyMap() != null) {
                 // The block node updates one entity at a time, both when it walks a chain
@@ -230,20 +230,17 @@ public enum GraphStructure {
                 return null;
             }
             var entityClass = descriptor.getEntityDescriptor().getEntityClass();
-            if (entityClass == elementEntityClass) {
-                continue;
-            }
-            if (elementEntityClass.isAssignableFrom(entityClass)
-                    || entityClass.isAssignableFrom(elementEntityClass)) {
+            if (entityClass != elementEntityClass
+                    && (elementEntityClass.isAssignableFrom(entityClass)
+                            || entityClass.isAssignableFrom(elementEntityClass))) {
                 // The block node's walk applies every element updater to every element,
                 // so a declarative variable declared elsewhere in the element hierarchy
                 // would be applied to elements that do not have it.
                 return null;
-            } else if (entityClass.isAssignableFrom(ownerEntityClass)) {
-                hasOwnerDescriptors = true;
             }
         }
-        if (!hasOwnerDescriptors) {
+        if (ownerEntityDescriptor.getShadowVariableDescriptors().stream()
+                .noneMatch(variableDescriptor -> variableDescriptor instanceof DeclarativeShadowVariableDescriptor<?>)) {
             // The block node tracks its looped status through the list entity's consistency state,
             // which only exists when the list entity has declarative shadow variables of its own.
             // A model whose only declarative variables are its elements' is covered by the

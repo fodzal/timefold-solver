@@ -21,7 +21,6 @@ import java.util.stream.Collectors;
 
 import ai.timefold.solver.core.api.function.TriFunction;
 import ai.timefold.solver.core.api.solver.SolutionManager;
-import ai.timefold.solver.core.impl.domain.entity.descriptor.EntityDescriptor;
 import ai.timefold.solver.core.impl.domain.solution.descriptor.SolutionDescriptor;
 import ai.timefold.solver.core.impl.domain.variable.descriptor.VariableDescriptor;
 import ai.timefold.solver.core.impl.score.director.InnerScoreDirector;
@@ -223,12 +222,12 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         var elementEntityClass = Objects.requireNonNull(graphStructureAndDirection.blockedElementClass());
         var allDescriptors = solutionDescriptor.getDeclarativeShadowVariableDescriptors();
         var listVariableDescriptor = Objects.requireNonNull(solutionDescriptor.getListVariableDescriptor());
-        var ownerEntityClass = listVariableDescriptor.getEntityDescriptor().getEntityClass();
-        var elementDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
-        var innerDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
         // The elements' consistency follows their list entity's, so the block node reports
         // its looped status through the list entity's consistency state.
-        EntityDescriptor<Solution_> ownerDescriptor = null;
+        var ownerEntityDescriptor = listVariableDescriptor.getEntityDescriptor();
+        var ownerEntityClass = ownerEntityDescriptor.getEntityClass();
+        var elementDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
+        var innerDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
         // The post-chain variables with direct list element sources get an edge from the block
         // node; the other post-chain variables depend on them through their own edges.
         var directPostChainVariableIdList = new ArrayList<VariableMetaModel<?, ?, ?>>();
@@ -242,7 +241,6 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             if (!entityDescriptor.getEntityClass().isAssignableFrom(ownerEntityClass)) {
                 continue;
             }
-            ownerDescriptor = entityDescriptor;
             for (var source : descriptor.getSources()) {
                 if (source.parentVariableType() == ParentVariableType.LIST_ELEMENT) {
                     directPostChainVariableIdList.add(descriptor.getVariableMetaModel());
@@ -254,9 +252,9 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         var listVariableMetaModel = listVariableDescriptor.<Object, Object> getVariableMetaModel();
 
         var changedVariableNotifier = graphDescriptor.changedVariableNotifier();
-        // Non-null: the detection requires the list entity to have declarative shadow variables.
+        // The detection requires the list entity to have declarative shadow variables.
         var ownerConsistencyState = graphDescriptor.consistencyTracker()
-                .getDeclarativeEntityConsistencyState(Objects.requireNonNull(ownerDescriptor));
+                .getDeclarativeEntityConsistencyState(ownerEntityDescriptor);
         var elementConsistencyState = graphDescriptor.consistencyTracker()
                 .getDeclarativeEntityConsistencyState(sortedElementDescriptors.getFirst().getEntityDescriptor());
 
