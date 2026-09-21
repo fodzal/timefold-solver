@@ -58,6 +58,7 @@ public enum GraphStructure {
      * variables (which read the elements). When the block node is processed, it walks the entity's
      * list from the earliest dirty element in the direction of
      * {@link GraphStructureAndDirection#direction()}.
+     * The list elements the block nodes represent are available via {@link GraphStructureAndDirection#blockedElementClass()}.
      * This decomposition is valid because the elements only read their chain and, through their
      * inverse, pre-chain declarative variables of their own list entity, and because the other
      * classes only reach the elements through the list variable itself.
@@ -66,10 +67,6 @@ public enum GraphStructure {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GraphStructure.class);
 
-    /**
-     * The blocked element class is the list elements the block nodes represent,
-     * non-null exactly for {@link #LIST_ELEMENT_BLOCK}.
-     */
     public record GraphStructureAndDirection(GraphStructure structure,
             @Nullable VariableMetaModel<?, ?, ?> parentMetaModel,
             @Nullable ParentVariableType direction,
