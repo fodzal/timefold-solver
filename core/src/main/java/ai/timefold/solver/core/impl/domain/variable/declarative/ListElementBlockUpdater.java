@@ -131,6 +131,7 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
         }
         var anyElementChangedInWalk = false;
         var current = chainStart;
+        var seenDirtyChainEnd = false;
         while (current != null) {
             if (!elementConsistencyState.isEntityConsistent(current)) {
                 elementConsistencyState.setEntityIsInconsistent(changedVariableNotifier, current, false);
@@ -140,11 +141,11 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
                 anyElementVariableChanged |= updater.updateIfChanged(current, changedVariableNotifier);
             }
             anyElementChangedInWalk |= anyElementVariableChanged;
-            // A swap can create multiple non-contiguous dirty elements on the same chain,
-            // so only terminate early once the last dirty element has been reached;
-            // a chain walked in full has no such element and is walked to its end.
-            if (canTerminateEarly && !anyElementVariableChanged && dirtyChainEnd != null
-                    && chainOrderComparator.compare(current, dirtyChainEnd) >= 0) {
+            seenDirtyChainEnd |= current == dirtyChainEnd;
+            // A swap can leave non-contiguous dirty elements, so stop only once the last one is
+            // reached; when dirtyChainEnd is null (whole chain), current == dirtyChainEnd can
+            // never hold here, so seenDirtyChainEnd stays false and the walk never stops early.
+            if (canTerminateEarly && !anyElementVariableChanged && seenDirtyChainEnd) {
                 break;
             }
             current = nextInChain.apply(current);
