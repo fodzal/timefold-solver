@@ -25,6 +25,8 @@ import org.jspecify.annotations.Nullable;
  * The dirty ranges are maintained by {@link ListElementBlockVariableReferenceGraph}
  * from the list variable's change events and the elements' source variable changes.
  * An entity with no dirty range has its whole chain walked.
+ * The dirty state of every list entity is allocated once;
+ * after an update, only the entities that update dirtied are reset.
  * <p>
  * When the block node is part of a dependency loop, the elements follow their entity:
  * they are marked inconsistent and their variables are set to null.
@@ -45,10 +47,9 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
 
     // Mutable dirty state, written by ListElementBlockVariableReferenceGraph
     // and by the notifier wrapper created in DefaultShadowVariableSessionFactory.
-    // An owner absent from these maps has its whole chain walked.
     private final List<Object> changedElementList;
-    private final IdentityHashMap<Object, Object> ownerToDirtyChainStart;
-    private final IdentityHashMap<Object, Object> ownerToDirtyChainEnd;
+    private final IdentityHashMap<Object, ChainState> ownerToChainStateMap;
+    private final List<ChainState> dirtyChainStateList;
 
     @SuppressWarnings("unchecked")
     ListElementBlockUpdater(
@@ -68,8 +69,8 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
         this.ownerToFirstElement = ownerToFirstElement;
         this.canTerminateEarly = canTerminateEarly;
         this.changedElementList = new ArrayList<>();
-        this.ownerToDirtyChainStart = new IdentityHashMap<>();
-        this.ownerToDirtyChainEnd = new IdentityHashMap<>();
+        this.ownerToChainStateMap = new IdentityHashMap<>();
+        this.dirtyChainStateList = new ArrayList<>();
 
         this.elementUpdaters = new VariableUpdaterInfo[sortedElementDescriptorList.size()];
         var updaterId = 0;
@@ -106,8 +107,9 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
     @Override
     public boolean update(Object owner, boolean isEntityInconsistent,
             ChangedVariableNotifier<Solution_> changedVariableNotifier) {
-        var chainStart = ownerToDirtyChainStart.remove(owner);
-        var dirtyChainEnd = ownerToDirtyChainEnd.remove(owner);
+        var chainState = ownerToChainStateMap.get(owner);
+        var chainStart = chainState.isWholeChainDirty ? null : chainState.dirtyChainStart;
+        var dirtyChainEnd = chainState.dirtyChainEnd;
         if (isEntityInconsistent) {
             // The owner is part of a dependency loop the solver may break later;
             // its elements read its pre-chain variables, so they are inconsistent with it.
@@ -181,8 +183,26 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
      * elements read through their inverse changed during the update.
      */
     void recordWholeChainDirty(Object owner) {
-        ownerToDirtyChainStart.remove(owner);
-        ownerToDirtyChainEnd.remove(owner);
+        // Null for an entity that shares the variable's declaring class without being a list entity.
+        var chainState = ownerToChainStateMap.get(owner);
+        if (chainState != null) {
+            chainState.isWholeChainDirty = true;
+            markDirty(chainState);
+        }
+    }
+
+    /**
+     * Registers a list entity whose block node this updater backs.
+     */
+    void addListEntity(Object owner) {
+        ownerToChainStateMap.put(owner, new ChainState(owner));
+    }
+
+    private void markDirty(ChainState chainState) {
+        if (!chainState.isDirty) {
+            chainState.isDirty = true;
+            dirtyChainStateList.add(chainState);
+        }
     }
 
     /**
@@ -205,29 +225,54 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
                 }
                 continue;
             }
-            var dirtyChainStart = ownerToDirtyChainStart.get(owner);
-            if (dirtyChainStart == null || chainOrderComparator.compare(element, dirtyChainStart) < 0) {
-                ownerToDirtyChainStart.put(owner, element);
+            var chainState = ownerToChainStateMap.get(owner);
+            if (chainState.dirtyChainStart == null
+                    || chainOrderComparator.compare(element, chainState.dirtyChainStart) < 0) {
+                chainState.dirtyChainStart = element;
             }
-            var dirtyChainEnd = ownerToDirtyChainEnd.get(owner);
-            if (dirtyChainEnd == null || chainOrderComparator.compare(element, dirtyChainEnd) > 0) {
-                ownerToDirtyChainEnd.put(owner, element);
+            if (chainState.dirtyChainEnd == null || chainOrderComparator.compare(element, chainState.dirtyChainEnd) > 0) {
+                chainState.dirtyChainEnd = element;
             }
+            markDirty(chainState);
         }
         changedElementList.clear();
-        // Marking is a bit in a set (or a slot in a topologically ordered queue) either way,
-        // so the order these identity maps happen to iterate in does not reach the result.
-        for (var owner : ownerToDirtyChainStart.keySet()) {
-            dirtyOwnerConsumer.accept(owner);
+        for (var chainState : dirtyChainStateList) {
+            dirtyOwnerConsumer.accept(chainState.owner);
         }
     }
 
     /**
-     * Clears the flags a block node did not consume during the update,
-     * e.g. when its entity was removed from the working solution.
+     * Resets the chains the update dirtied, including those whose block node was not processed,
+     * e.g. because the graph gave up on a structurally flawed solution.
      */
-    void clearTransientState() {
-        ownerToDirtyChainStart.clear();
-        ownerToDirtyChainEnd.clear();
+    void endUpdate() {
+        for (var chainState : dirtyChainStateList) {
+            chainState.reset();
+        }
+        dirtyChainStateList.clear();
+    }
+
+    /**
+     * The dirty part of a list entity's chain.
+     */
+    private static final class ChainState {
+
+        private final Object owner;
+        private @Nullable Object dirtyChainStart;
+        private @Nullable Object dirtyChainEnd;
+        private boolean isWholeChainDirty;
+        // In dirtyChainStateList.
+        private boolean isDirty;
+
+        private ChainState(Object owner) {
+            this.owner = owner;
+        }
+
+        private void reset() {
+            dirtyChainStart = null;
+            dirtyChainEnd = null;
+            isWholeChainDirty = false;
+            isDirty = false;
+        }
     }
 }

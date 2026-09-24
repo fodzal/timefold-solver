@@ -360,6 +360,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             // variable an after processor was registered for, the list variable among them, which is
             // what marks every block node changed for the initial walk.
             builder.addVariableReferenceEntity(owner, List.of(blockUpdater));
+            blockUpdater.addListEntity(owner);
             var blockNode = builder.lookupOrError(listVariableMetaModel, owner);
             // lookupOrNull: an extended model may declare the variable on a subclass only.
             for (var preChainVariableId : preChainVariableIdSet) {
