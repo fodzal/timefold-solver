@@ -149,11 +149,13 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
     @Override
     public boolean updateChanged() {
         isProcessing = true;
+        var isUpdated = false;
         try {
             blockUpdater.classifyChangedElements(changedVariableNotifier, this::markBlockNodeChanged);
-            return innerGraph.updateChanged();
+            isUpdated = innerGraph.updateChanged();
+            return isUpdated;
         } finally {
-            blockUpdater.endUpdate();
+            blockUpdater.endUpdate(isUpdated);
             isProcessing = false;
         }
     }

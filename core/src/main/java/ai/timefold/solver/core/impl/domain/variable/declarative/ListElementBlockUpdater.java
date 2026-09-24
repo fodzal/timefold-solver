@@ -242,10 +242,18 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
     }
 
     /**
-     * Resets the chains the update dirtied, including those whose block node was not processed,
-     * e.g. because the graph gave up on a structurally flawed solution.
+     * Resets the chains the update dirtied.
+     * An update that gave up on a dependency loop processed no block node, and the graph keeps their
+     * marks for the next update; their chains are kept for it too, whole, because a legacy composite
+     * move may change them again before that update, without undoing first.
      */
-    void endUpdate() {
+    void endUpdate(boolean isUpdated) {
+        if (!isUpdated) {
+            for (var chainState : dirtyChainStateList) {
+                chainState.isWholeChainDirty = true;
+            }
+            return;
+        }
         for (var chainState : dirtyChainStateList) {
             chainState.reset();
         }
