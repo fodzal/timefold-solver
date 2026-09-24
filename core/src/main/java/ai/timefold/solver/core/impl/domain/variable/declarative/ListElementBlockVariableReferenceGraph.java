@@ -176,17 +176,12 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
      * skips along with the edges. Without it, removing the list's last element would leave no element
      * to walk and no edge to the entity, so nothing would recompute its post-chain variables.
      */
-    @SuppressWarnings("ForLoopReplaceableByForEach")
     private void markPostChainVariablesChanged(Object entity) {
         var nodeGraph = innerNodeGraph;
         if (nodeGraph == null) {
             return;
         }
-        // Avoid creation of iterators on the hot path, as the graph does.
-        var processorCount = listVariableAfterProcessorList.size();
-        for (var i = 0; i < processorCount; i++) {
-            listVariableAfterProcessorList.get(i).accept(nodeGraph, entity);
-        }
+        nodeGraph.processEntity(listVariableAfterProcessorList, entity);
     }
 
     private void markBlockNodeChanged(Object owner) {
