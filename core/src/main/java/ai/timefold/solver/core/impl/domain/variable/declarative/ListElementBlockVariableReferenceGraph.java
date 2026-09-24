@@ -1,11 +1,14 @@
 package ai.timefold.solver.core.impl.domain.variable.declarative;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 
+import ai.timefold.solver.core.api.score.analysis.EntityVariablePair;
 import ai.timefold.solver.core.api.score.analysis.VariableLoop;
 import ai.timefold.solver.core.preview.api.domain.metamodel.VariableMetaModel;
 
@@ -40,6 +43,7 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
     private final VariableReferenceGraph innerGraph;
     private final @Nullable AbstractVariableReferenceGraph<Solution_, ?> innerNodeGraph;
     private final ListElementBlockUpdater<Solution_> blockUpdater;
+    private final String listVariableName;
     private final Class<?> elementEntityClass;
     private final Set<VariableMetaModel<?, ?, ?>> monitoredSourceVariableSet;
     private final ChangedVariableNotifier<Solution_> changedVariableNotifier;
@@ -73,6 +77,7 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
                 ? (AbstractVariableReferenceGraph<Solution_, ?>) abstractGraph
                 : null;
         this.blockUpdater = blockUpdater;
+        this.listVariableName = listVariableMetaModel.name();
         this.elementEntityClass = elementEntityClass;
         this.changedVariableNotifier = changedVariableNotifier;
         this.ownerToBlockNodeMap = innerNodeGraph == null ? Map.of()
@@ -157,9 +162,23 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
 
     @Override
     public List<VariableLoop> getVariableLoops() {
-        // A loop that closes through a chain runs through the entity's block node,
-        // which the graph reports as its list variable; its elements follow their entity.
-        return innerGraph.getVariableLoops();
+        var innerVariableLoopList = innerGraph.getVariableLoops();
+        var variableLoopList = new ArrayList<VariableLoop>(innerVariableLoopList.size());
+        for (var innerVariableLoop : innerVariableLoopList) {
+            // A loop that closes through a chain runs through its entity's block node, which the graph
+            // reports as the list variable; like the arbitrary graph, report the chain's elements instead.
+            var involvedVariableSet = new LinkedHashSet<EntityVariablePair>();
+            for (var entityVariablePair : innerVariableLoop.involvedVariableSet()) {
+                var entity = entityVariablePair.entity();
+                if (entityVariablePair.variableName().equals(listVariableName) && ownerToBlockNodeMap.containsKey(entity)) {
+                    blockUpdater.addElementVariables(entity, involvedVariableSet);
+                } else {
+                    involvedVariableSet.add(entityVariablePair);
+                }
+            }
+            variableLoopList.add(new VariableLoop(involvedVariableSet));
+        }
+        return variableLoopList;
     }
 
     /**

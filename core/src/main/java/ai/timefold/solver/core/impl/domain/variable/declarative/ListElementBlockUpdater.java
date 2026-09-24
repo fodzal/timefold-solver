@@ -5,8 +5,10 @@ import java.util.Arrays;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Consumer;
 
+import ai.timefold.solver.core.api.score.analysis.EntityVariablePair;
 import ai.timefold.solver.core.impl.domain.variable.ListVariableState;
 import ai.timefold.solver.core.impl.domain.variable.descriptor.ListVariableDescriptor;
 import ai.timefold.solver.core.preview.api.domain.metamodel.VariableMetaModel;
@@ -243,6 +245,17 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
      */
     void recordChangedList(Object owner) {
         markDirty(ownerToChainStateMap.get(owner));
+    }
+
+    /**
+     * Adds every declarative variable of every element of the list entity's chain.
+     */
+    void addElementVariables(Object owner, Set<EntityVariablePair> entityVariablePairSet) {
+        for (var element : listVariableDescriptor.getValue(owner)) {
+            for (var updater : elementUpdaters) {
+                entityVariablePairSet.add(new EntityVariablePair(element, updater.id().name()));
+            }
+        }
     }
 
     /**

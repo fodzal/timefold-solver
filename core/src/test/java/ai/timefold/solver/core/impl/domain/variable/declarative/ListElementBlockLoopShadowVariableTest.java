@@ -5,11 +5,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.ArrayList;
 import java.util.List;
 
+import ai.timefold.solver.core.api.score.SimpleScore;
+import ai.timefold.solver.core.config.solver.EnvironmentMode;
 import ai.timefold.solver.core.impl.domain.solution.descriptor.DefaultPlanningListVariableMetaModel;
 import ai.timefold.solver.core.impl.domain.solution.descriptor.DefaultPlanningVariableMetaModel;
 import ai.timefold.solver.core.impl.heuristic.move.SelectorBasedCompositeMove;
 import ai.timefold.solver.core.impl.heuristic.selector.move.generic.SelectorBasedChangeMove;
 import ai.timefold.solver.core.impl.heuristic.selector.move.generic.list.SelectorBasedListChangeMove;
+import ai.timefold.solver.core.impl.score.director.easy.EasyScoreDirectorFactory;
 import ai.timefold.solver.core.preview.api.move.builtin.Moves;
 import ai.timefold.solver.core.preview.api.move.test.MoveTester;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_loop.TestdataChainLoopSolution;
@@ -81,6 +84,37 @@ class ListElementBlockLoopShadowVariableTest {
         assertThat(a1.getEndServiceTime()).isEqualTo(16);
         assertThat(a2.getEndServiceTime()).isEqualTo(19);
         assertThat(vehicleA.getEndTime()).isEqualTo(19);
+    }
+
+    /**
+     * A loop through routes reports their visits, as the arbitrary graph does, rather than the block nodes
+     * standing for them: the visits are what the solver unassigns from an initial solution caught in a loop.
+     */
+    @Test
+    void loopReportsTheVisitsOfTheRoutesItRunsThrough() {
+        var a1 = new TestdataChainLoopVisit("a1", 2);
+        var a2 = new TestdataChainLoopVisit("a2", 3);
+        var b1 = new TestdataChainLoopVisit("b1", 4);
+        var vehicleA = new TestdataChainLoopVehicle("A", 0);
+        var vehicleB = new TestdataChainLoopVehicle("B", 10);
+        vehicleA.setVisits(new ArrayList<>(List.of(a1, a2)));
+        vehicleB.setVisits(new ArrayList<>(List.of(b1)));
+        vehicleA.setPreviousVehicle(vehicleB);
+        vehicleB.setPreviousVehicle(vehicleA);
+        var solution = new TestdataChainLoopSolution();
+        solution.setVehicles(List.of(vehicleA, vehicleB));
+        solution.setVisits(List.of(a1, a2, b1));
+
+        var solutionDescriptor = TestdataChainLoopSolution.buildSolutionDescriptor();
+        var scoreDirector = new EasyScoreDirectorFactory<>(solutionDescriptor,
+                (TestdataChainLoopSolution s) -> SimpleScore.of(0), EnvironmentMode.PHASE_ASSERT)
+                .buildScoreDirector();
+        scoreDirector.setWorkingSolution(solution);
+        var arbitraryGraph = DefaultShadowVariableSessionFactory.buildGraphForStructureAndDirection(
+                new GraphStructure.GraphStructureAndDirection(GraphStructure.ARBITRARY, null, null),
+                new DefaultShadowVariableSessionFactory.GraphDescriptor<>(solutionDescriptor,
+                        ChangedVariableNotifier.empty(), vehicleA, vehicleB, a1, a2, b1));
+        assertThat(scoreDirector.computeVariableLoops()).isEqualTo(arbitraryGraph.getVariableLoops());
     }
 
     /**
