@@ -1,13 +1,12 @@
 package ai.timefold.solver.core.impl.domain.variable.declarative;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.UnaryOperator;
 
+import ai.timefold.solver.core.impl.domain.variable.ListVariableState;
+import ai.timefold.solver.core.impl.domain.variable.descriptor.ListVariableDescriptor;
 import ai.timefold.solver.core.preview.api.domain.metamodel.VariableMetaModel;
 
 import org.jspecify.annotations.NullMarked;
@@ -20,7 +19,7 @@ import org.jspecify.annotations.Nullable;
  * <p>
  * A single instance backs every list entity's block node.
  * When a block node is processed, {@link #update(Object, boolean, ChangedVariableNotifier)}
- * walks the entity's chain from the earliest dirty element and reports whether anything
+ * walks the entity's list from the earliest dirty element and reports whether anything
  * changed, which propagates to the entity's post-chain variables through the graph's edges.
  * The dirty ranges are maintained by {@link ListElementBlockVariableReferenceGraph}
  * from the list variable's change events and the elements' source variable changes.
@@ -35,14 +34,13 @@ import org.jspecify.annotations.Nullable;
 final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Solution_> {
 
     private final VariableMetaModel<Solution_, ?, ?> listVariableMetaModel;
+    private final ListVariableDescriptor<Solution_> listVariableDescriptor;
+    private final ListVariableState<Solution_, Object, Object> listVariableState;
+    // A previous element parent orders the chain as the list; a next element parent reverses it.
+    private final boolean isChainInListOrder;
     private final EntityConsistencyState<Solution_, Object> ownerConsistencyState;
     private final EntityConsistencyState<Solution_, Object> elementConsistencyState;
     private final VariableUpdaterInfo<Solution_>[] elementUpdaters;
-
-    private final UnaryOperator<@Nullable Object> nextInChain;
-    private final UnaryOperator<Object> elementToOwner;
-    private final Comparator<Object> chainOrderComparator;
-    private final Function<Object, @Nullable Object> ownerToFirstElement;
     private final boolean canTerminateEarly;
 
     // Mutable dirty state, written by ListElementBlockVariableReferenceGraph
@@ -53,20 +51,19 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
 
     @SuppressWarnings("unchecked")
     ListElementBlockUpdater(
-            VariableMetaModel<Solution_, ?, ?> listVariableMetaModel,
+            ListVariableDescriptor<Solution_> listVariableDescriptor,
+            ListVariableState<Solution_, Object, Object> listVariableState,
+            boolean isChainInListOrder,
             EntityConsistencyState<Solution_, Object> ownerConsistencyState,
             EntityConsistencyState<Solution_, Object> elementConsistencyState,
             List<DeclarativeShadowVariableDescriptor<Solution_>> sortedElementDescriptorList,
-            TopologicalSorter topologicalSorter,
-            Function<Object, @Nullable Object> ownerToFirstElement,
             boolean canTerminateEarly) {
-        this.listVariableMetaModel = listVariableMetaModel;
+        this.listVariableMetaModel = listVariableDescriptor.getVariableMetaModel();
+        this.listVariableDescriptor = listVariableDescriptor;
+        this.listVariableState = listVariableState;
+        this.isChainInListOrder = isChainInListOrder;
         this.ownerConsistencyState = ownerConsistencyState;
         this.elementConsistencyState = elementConsistencyState;
-        this.nextInChain = topologicalSorter.successor();
-        this.elementToOwner = topologicalSorter.key();
-        this.chainOrderComparator = topologicalSorter.comparator();
-        this.ownerToFirstElement = ownerToFirstElement;
         this.canTerminateEarly = canTerminateEarly;
         this.changedElementList = new ArrayList<>();
         this.ownerToChainStateMap = new IdentityHashMap<>();
@@ -107,67 +104,69 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
     @Override
     public boolean update(Object owner, boolean isEntityInconsistent,
             ChangedVariableNotifier<Solution_> changedVariableNotifier) {
-        var chainState = ownerToChainStateMap.get(owner);
-        var chainStart = chainState.isWholeChainDirty ? null : chainState.dirtyChainStart;
-        var dirtyChainEnd = chainState.dirtyChainEnd;
+        // The list cannot change while the graph updates, so it is read once.
+        var elementList = listVariableDescriptor.getValue(owner);
         if (isEntityInconsistent) {
             // The owner is part of a dependency loop the solver may break later;
             // its elements read its pre-chain variables, so they are inconsistent with it.
-            return markChainInconsistent(owner, changedVariableNotifier);
+            return markChainInconsistent(elementList, changedVariableNotifier);
         }
-        var firstElement = ownerToFirstElement.apply(owner);
-        if (chainStart == null
-                || (firstElement != null && !elementConsistencyState.isEntityConsistent(firstElement))) {
-            // Nothing was recorded, or the owner recovered from a dependency loop that left its
-            // whole chain inconsistent; either way the chain is walked from its first element.
-            chainStart = firstElement;
-            dirtyChainEnd = null;
+        var chainState = ownerToChainStateMap.get(owner);
+        var chainLength = elementList.size();
+        if (chainState.isWholeChainDirty || chainState.lastDirtyIndex < 0
+                || (chainLength > 0 && !elementConsistencyState.isEntityConsistent(elementAt(elementList, 0)))) {
+            // Nothing was recorded, a variable the elements read changed, or the owner recovered from a
+            // dependency loop that left its whole chain inconsistent: the whole chain is walked.
+            return walkChain(elementList, 0, chainLength, changedVariableNotifier);
         }
-        return walkChain(chainStart, dirtyChainEnd, changedVariableNotifier);
+        var firstDirtyPosition = isChainInListOrder ? chainState.firstDirtyIndex : chainLength - 1 - chainState.lastDirtyIndex;
+        var lastDirtyPosition = isChainInListOrder ? chainState.lastDirtyIndex : chainLength - 1 - chainState.firstDirtyIndex;
+        return walkChain(elementList, firstDirtyPosition, lastDirtyPosition, changedVariableNotifier);
     }
 
-    private boolean walkChain(@Nullable Object chainStart, @Nullable Object dirtyChainEnd,
+    /**
+     * @param lastDirtyPosition the walk does not stop early before it;
+     *        the chain length for a chain walked in full
+     */
+    private boolean walkChain(List<Object> elementList, int firstDirtyPosition, int lastDirtyPosition,
             ChangedVariableNotifier<Solution_> changedVariableNotifier) {
-        if (chainStart == null) {
-            return false;
-        }
         var anyElementChangedInWalk = false;
-        var current = chainStart;
-        var seenDirtyChainEnd = false;
-        while (current != null) {
-            if (!elementConsistencyState.isEntityConsistent(current)) {
-                elementConsistencyState.setEntityIsInconsistent(changedVariableNotifier, current, false);
+        var chainLength = elementList.size();
+        for (var position = firstDirtyPosition; position < chainLength; position++) {
+            var element = elementAt(elementList, position);
+            if (!elementConsistencyState.isEntityConsistent(element)) {
+                elementConsistencyState.setEntityIsInconsistent(changedVariableNotifier, element, false);
             }
             var anyElementVariableChanged = false;
             for (var updater : elementUpdaters) {
-                anyElementVariableChanged |= updater.updateIfChanged(current, changedVariableNotifier);
+                anyElementVariableChanged |= updater.updateIfChanged(element, changedVariableNotifier);
             }
             anyElementChangedInWalk |= anyElementVariableChanged;
-            seenDirtyChainEnd |= current == dirtyChainEnd;
-            // A swap can leave non-contiguous dirty elements, so stop only once the last one is
-            // reached; when dirtyChainEnd is null (whole chain), current == dirtyChainEnd can
-            // never hold here, so seenDirtyChainEnd stays false and the walk never stops early.
-            if (canTerminateEarly && !anyElementVariableChanged && seenDirtyChainEnd) {
+            // A swap can leave non-contiguous dirty elements, so stop only past the last one.
+            if (canTerminateEarly && !anyElementVariableChanged && position >= lastDirtyPosition) {
                 break;
             }
-            current = nextInChain.apply(current);
         }
         return anyElementChangedInWalk;
     }
 
-    private boolean markChainInconsistent(Object owner, ChangedVariableNotifier<Solution_> changedVariableNotifier) {
+    private boolean markChainInconsistent(List<Object> elementList,
+            ChangedVariableNotifier<Solution_> changedVariableNotifier) {
         var anyElementChanged = false;
-        var current = ownerToFirstElement.apply(owner);
-        while (current != null) {
-            if (elementConsistencyState.isEntityConsistent(current)) {
-                elementConsistencyState.setEntityIsInconsistent(changedVariableNotifier, current, true);
+        for (var position = 0; position < elementList.size(); position++) {
+            var element = elementAt(elementList, position);
+            if (elementConsistencyState.isEntityConsistent(element)) {
+                elementConsistencyState.setEntityIsInconsistent(changedVariableNotifier, element, true);
             }
             for (var updater : elementUpdaters) {
-                anyElementChanged |= updater.updateIfChanged(current, null, changedVariableNotifier);
+                anyElementChanged |= updater.updateIfChanged(element, null, changedVariableNotifier);
             }
-            current = nextInChain.apply(current);
         }
         return anyElementChanged;
+    }
+
+    private Object elementAt(List<Object> elementList, int position) {
+        return elementList.get(isChainInListOrder ? position : elementList.size() - 1 - position);
     }
 
     /**
@@ -215,7 +214,7 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
     void classifyChangedElements(ChangedVariableNotifier<Solution_> changedVariableNotifier,
             Consumer<Object> dirtyOwnerConsumer) {
         for (var element : changedElementList) {
-            var owner = elementToOwner.apply(element);
+            var owner = listVariableState.getInverseSingleton(element);
             if (owner == null) {
                 if (!elementConsistencyState.isEntityConsistent(element)) {
                     elementConsistencyState.setEntityIsInconsistent(changedVariableNotifier, element, false);
@@ -226,13 +225,9 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
                 continue;
             }
             var chainState = ownerToChainStateMap.get(owner);
-            if (chainState.dirtyChainStart == null
-                    || chainOrderComparator.compare(element, chainState.dirtyChainStart) < 0) {
-                chainState.dirtyChainStart = element;
-            }
-            if (chainState.dirtyChainEnd == null || chainOrderComparator.compare(element, chainState.dirtyChainEnd) > 0) {
-                chainState.dirtyChainEnd = element;
-            }
+            var index = listVariableState.getIndexOrFail(element);
+            chainState.firstDirtyIndex = Math.min(chainState.firstDirtyIndex, index);
+            chainState.lastDirtyIndex = Math.max(chainState.lastDirtyIndex, index);
             markDirty(chainState);
         }
         changedElementList.clear();
@@ -261,13 +256,13 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
     }
 
     /**
-     * The dirty part of a list entity's chain.
+     * The dirty part of a list entity's chain, as list indexes.
      */
     private static final class ChainState {
 
         private final Object owner;
-        private @Nullable Object dirtyChainStart;
-        private @Nullable Object dirtyChainEnd;
+        private int firstDirtyIndex = Integer.MAX_VALUE;
+        private int lastDirtyIndex = -1;
         private boolean isWholeChainDirty;
         // In dirtyChainStateList.
         private boolean isDirty;
@@ -277,8 +272,8 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
         }
 
         private void reset() {
-            dirtyChainStart = null;
-            dirtyChainEnd = null;
+            firstDirtyIndex = Integer.MAX_VALUE;
+            lastDirtyIndex = -1;
             isWholeChainDirty = false;
             isDirty = false;
         }

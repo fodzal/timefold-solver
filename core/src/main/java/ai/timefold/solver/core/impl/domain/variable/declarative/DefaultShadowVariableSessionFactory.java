@@ -259,22 +259,11 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         var elementConsistencyState = graphDescriptor.consistencyTracker()
                 .getDeclarativeEntityConsistencyState(sortedElementDescriptors.getFirst().getEntityDescriptor());
 
-        // The topologically first chain element is the list's first element for a previous parent,
-        // but the list's last element for a next parent, whose successor function walks backwards.
-        var isPreviousDirection = graphStructureAndDirection.direction() == ParentVariableType.PREVIOUS;
-        Function<Object, @Nullable Object> ownerToFirstElement = owner -> {
-            var elementList = listVariableDescriptor.getValue(owner);
-            if (elementList.isEmpty()) {
-                return null;
-            }
-            return isPreviousDirection ? elementList.getFirst() : elementList.getLast();
-        };
-        var topologicalSorter = getTopologicalSorter(solutionDescriptor,
-                Objects.requireNonNull(changedVariableNotifier.innerScoreDirector()),
-                Objects.requireNonNull(graphStructureAndDirection.direction()));
-        var blockUpdater = new ListElementBlockUpdater<>(listVariableMetaModel, ownerConsistencyState,
-                elementConsistencyState, sortedElementDescriptors, topologicalSorter, ownerToFirstElement,
-                hasNoNonDeclarativeSourcesFromParent(elementDescriptorList));
+        var listVariableState = Objects.requireNonNull(changedVariableNotifier.innerScoreDirector())
+                .<Object, Object> getListVariableState(listVariableDescriptor);
+        var blockUpdater = new ListElementBlockUpdater<>(listVariableDescriptor, listVariableState,
+                graphStructureAndDirection.direction() == ParentVariableType.PREVIOUS, ownerConsistencyState,
+                elementConsistencyState, sortedElementDescriptors, hasNoNonDeclarativeSourcesFromParent(elementDescriptorList));
 
         // The pre-chain variables the elements read through their inverse: when one of them changes
         // during an update, its entity's whole list must be walked, since any element may read it.

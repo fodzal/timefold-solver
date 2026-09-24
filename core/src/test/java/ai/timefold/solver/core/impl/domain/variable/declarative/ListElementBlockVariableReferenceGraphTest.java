@@ -52,11 +52,11 @@ class ListElementBlockVariableReferenceGraphTest {
         Mockito.when(scoreDirector.getListVariableState(Mockito.any())).thenReturn(listVariableState);
 
         // The list variable listeners are not running, so the element shadow variables are set by hand.
-        link(listVariableState, vehicleA, a1, null, a2, 0);
-        link(listVariableState, vehicleA, a2, a1, null, 1);
-        link(listVariableState, vehicleB, b1, null, b2, 0);
-        link(listVariableState, vehicleB, b2, b1, null, 1);
-        link(listVariableState, null, a3, null, null, -1);
+        link(listVariableState, vehicleA, a1, null, 0);
+        link(listVariableState, vehicleA, a2, a1, 1);
+        link(listVariableState, vehicleB, b1, null, 0);
+        link(listVariableState, vehicleB, b2, b1, 1);
+        link(listVariableState, null, a3, null, -1);
 
         var graph = DefaultShadowVariableSessionFactory.buildListElementBlockGraph(
                 new DefaultShadowVariableSessionFactory.GraphDescriptor<>(
@@ -76,8 +76,7 @@ class ListElementBlockVariableReferenceGraphTest {
 
         // Append a3 to the end of vehicle A's route.
         vehicleA.getVisits().add(a3);
-        link(listVariableState, vehicleA, a3, a2, null, 2);
-        Mockito.when(listVariableState.getNextElement(a2)).thenReturn(a3);
+        link(listVariableState, vehicleA, a3, a2, 2);
 
         var visitMetaModel = solutionDescriptor.getMetaModel().entity(TestdataMultiEntityChainVisit.class);
         graph.afterVariableChanged(visitMetaModel.variable("vehicle"), a3);
@@ -199,11 +198,10 @@ class ListElementBlockVariableReferenceGraphTest {
     private static void link(
             ListVariableState<TestdataMultiEntityChainSolution, TestdataMultiEntityChainVehicle, TestdataMultiEntityChainVisit> listVariableState,
             TestdataMultiEntityChainVehicle vehicle, TestdataMultiEntityChainVisit visit,
-            TestdataMultiEntityChainVisit previousVisit, TestdataMultiEntityChainVisit nextVisit, int index) {
+            TestdataMultiEntityChainVisit previousVisit, int index) {
         visit.setVehicle(vehicle);
         visit.setPreviousVisit(previousVisit);
-        Mockito.doReturn(index).when(listVariableState).getIndexOrElse(Mockito.eq(visit), Mockito.anyInt());
-        Mockito.when(listVariableState.getNextElement(visit)).thenReturn(nextVisit);
+        Mockito.doReturn(index).when(listVariableState).getIndexOrFail(visit);
         Mockito.when(listVariableState.getInverseSingleton(visit)).thenReturn(vehicle);
     }
 }
