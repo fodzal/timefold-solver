@@ -106,17 +106,18 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
             ChangedVariableNotifier<Solution_> changedVariableNotifier) {
         // The list cannot change while the graph updates, so it is read once.
         var elementList = listVariableDescriptor.getValue(owner);
+        var chainState = ownerToChainStateMap.get(owner);
         if (isEntityInconsistent) {
             // The owner is part of a dependency loop the solver may break later;
             // its elements read its pre-chain variables, so they are inconsistent with it.
+            chainState.isChainInconsistent = true;
             return markChainInconsistent(elementList, changedVariableNotifier);
         }
-        var chainState = ownerToChainStateMap.get(owner);
         var chainLength = elementList.size();
-        if (chainState.isWholeChainDirty || chainState.lastDirtyIndex < 0
-                || (chainLength > 0 && !elementConsistencyState.isEntityConsistent(elementAt(elementList, 0)))) {
-            // Nothing was recorded, a variable the elements read changed, or the owner recovered from a
-            // dependency loop that left its whole chain inconsistent: the whole chain is walked.
+        if (chainState.isChainInconsistent || chainState.isWholeChainDirty || chainState.lastDirtyIndex < 0) {
+            // The owner left a dependency loop that took its whole chain down, a variable the elements read
+            // changed, or nothing was recorded: the whole chain is walked.
+            chainState.isChainInconsistent = false;
             return walkChain(elementList, 0, chainLength, changedVariableNotifier);
         }
         var firstDirtyPosition = isChainInListOrder ? chainState.firstDirtyIndex : chainLength - 1 - chainState.lastDirtyIndex;
@@ -266,6 +267,8 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
         private boolean isWholeChainDirty;
         // In dirtyChainStateList.
         private boolean isDirty;
+        // Marked inconsistent by a dependency loop, until the owner leaves it; not reset between updates.
+        private boolean isChainInconsistent;
 
         private ChainState(Object owner) {
             this.owner = owner;
