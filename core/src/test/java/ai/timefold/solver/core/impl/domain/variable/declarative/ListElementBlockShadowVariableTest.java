@@ -88,7 +88,7 @@ class ListElementBlockShadowVariableTest {
     }
 
     @Test
-    void swapCreatesNonContiguousDirtyElements() {
+    void swapWithinARoute() {
         var v1 = new TestdataMultiEntityChainVisit("v1", 1);
         var v2 = new TestdataMultiEntityChainVisit("v2", 5);
         var v3 = new TestdataMultiEntityChainVisit("v3", 3);
@@ -107,7 +107,7 @@ class ListElementBlockShadowVariableTest {
         var context = MoveTester.build(solutionMetaModel).using(solution);
         assertThat(vehicle.getEndTime()).isEqualTo(1 + 5 + 3 + 2);
 
-        // Swap the first and third visits: the dirty elements are non-contiguous.
+        // Swap the first and third visits.
         context.execute(Moves.swap(listVariableMetaModel, vehicle, 0, vehicle, 2));
         assertThat(v3.getEndServiceTime()).isEqualTo(3);
         assertThat(v2.getEndServiceTime()).isEqualTo(8);
@@ -162,7 +162,7 @@ class ListElementBlockShadowVariableTest {
 
     /**
      * Emptying a route leaves no element to walk, so only the entity's post-chain variables carry
-     * the change; the block node's structural change flag is what marks them.
+     * the change; the list change is what marks them.
      */
     @Test
     void emptyingARouteUpdatesItsPostChainVariables() {

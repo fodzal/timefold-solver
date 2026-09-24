@@ -104,8 +104,8 @@ class ListElementBlockElementSourcedShadowVariableTest {
 
     /**
      * A move that both dirties a route and closes a dependency loop. The update gives up on the
-     * loop, possibly before it reached that route's block node, so it must keep the route's dirty
-     * range for the update that follows the undo; dropping it would leave the route stale forever.
+     * loop, possibly before it reached that route's block node, so the route must stay dirty
+     * for the update that follows the undo; dropping it would leave the route stale forever.
      */
     @Test
     void aMoveThatDirtiesARouteAndClosesALoopLeavesNothingStale() {

@@ -233,7 +233,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         var directPostChainVariableIdList = new ArrayList<VariableMetaModel<?, ?, ?>>();
         for (var descriptor : allDescriptors) {
             var entityDescriptor = descriptor.getEntityDescriptor();
-            if (elementEntityClass.isAssignableFrom(entityDescriptor.getEntityClass())) {
+            if (entityDescriptor.getEntityClass() == elementEntityClass) {
                 elementDescriptorList.add(descriptor);
                 continue;
             }

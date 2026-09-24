@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiConsumer;
 
@@ -35,11 +36,12 @@ import org.jspecify.annotations.Nullable;
  * The classification runs before the delegated update, and recomputes the elements that left their
  * list along the way; those writes come back here through the score director. The graph's own
  * reentrancy guard does not cover that window, since it only spans the update it delegates to,
- * hence {@link #isProcessing}: without it the classification would add to the list it is iterating.
+ * hence {@link #isUpdating}: without it the classification would add to the list it is iterating.
  */
 @NullMarked
 final class ListElementBlockVariableReferenceGraph<Solution_> implements VariableReferenceGraph {
 
+    // These are immutable.
     private final VariableReferenceGraph innerGraph;
     private final @Nullable AbstractVariableReferenceGraph<Solution_, ?> innerNodeGraph;
     private final ListElementBlockUpdater<Solution_> blockUpdater;
@@ -49,7 +51,7 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
     private final ChangedVariableNotifier<Solution_> changedVariableNotifier;
     /**
      * Owner to block node. Hoisted at construction because the per-variable map is keyed by
-     * {@link VariableMetaModel}, whose equals is expensive, and this lookup runs per changed element.
+     * {@link VariableMetaModel}, whose equals is expensive, and this lookup runs for every dirty chain.
      */
     private final Map<Object, GraphNode<Solution_>> ownerToBlockNodeMap;
     /**
@@ -58,7 +60,8 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
      */
     private final List<BiConsumer<AbstractVariableReferenceGraph<Solution_, ?>, Object>> listVariableAfterProcessorList;
 
-    private boolean isProcessing;
+    // This is mutable.
+    private boolean isUpdating;
 
     ListElementBlockVariableReferenceGraph(
             VariableReferenceGraph innerGraph,
@@ -84,7 +87,7 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
                 : innerNodeGraph.variableReferenceToContainingNodeMap.getOrDefault(listVariableMetaModel, Map.of());
         this.listVariableAfterProcessorList = innerNodeGraph == null ? List.of()
                 : innerNodeGraph.variableReferenceToAfterProcessor.getOrDefault(listVariableMetaModel, List.of());
-        this.isProcessing = false;
+        this.isUpdating = false;
 
         this.monitoredSourceVariableSet = new HashSet<>();
         for (var descriptor : elementDescriptorList) {
@@ -108,7 +111,7 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
 
     @Override
     public void beforeVariableChanged(VariableMetaModel<?, ?, ?> variableReference, Object entity) {
-        if (isProcessing) {
+        if (isUpdating) {
             // A reentrant event of this graph's own update.
             return;
         }
@@ -117,7 +120,7 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
 
     @Override
     public void afterVariableChanged(VariableMetaModel<?, ?, ?> variableReference, Object entity) {
-        if (isProcessing) {
+        if (isUpdating) {
             return;
         }
         if (monitoredSourceVariableSet.contains(variableReference) && elementEntityClass.isInstance(entity)) {
@@ -148,7 +151,7 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
 
     @Override
     public boolean updateChanged() {
-        isProcessing = true;
+        isUpdating = true;
         var isUpdated = false;
         try {
             blockUpdater.classifyChangedElements(changedVariableNotifier, this::markBlockNodeChanged);
@@ -156,7 +159,7 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
             return isUpdated;
         } finally {
             blockUpdater.endUpdate(isUpdated);
-            isProcessing = false;
+            isUpdating = false;
         }
     }
 
@@ -200,11 +203,6 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
             return;
         }
         // Every list entity of the solution the graph was built for has a block node.
-        var blockNode = ownerToBlockNodeMap.get(owner);
-        if (blockNode == null) {
-            throw new IllegalStateException(
-                    "Impossible state: the list entity (%s) has no block node in the graph.".formatted(owner));
-        }
-        nodeGraph.markChanged(blockNode);
+        nodeGraph.markChanged(Objects.requireNonNull(ownerToBlockNodeMap.get(owner)));
     }
 }

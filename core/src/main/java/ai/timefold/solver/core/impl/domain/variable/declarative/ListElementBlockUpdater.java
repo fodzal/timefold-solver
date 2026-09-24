@@ -38,6 +38,7 @@ import org.jspecify.annotations.Nullable;
 @NullMarked
 final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Solution_> {
 
+    // These are immutable.
     private final VariableMetaModel<Solution_, ?, ?> listVariableMetaModel;
     private final ListVariableDescriptor<Solution_> listVariableDescriptor;
     private final ListVariableState<Solution_, Object, Object> listVariableState;
@@ -50,7 +51,7 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
     private final DeclarativeShadowVariableDescriptor<Solution_>[] preChainVariableDescriptors;
     private final boolean canTerminateEarly;
 
-    // Mutable dirty state, written by ListElementBlockVariableReferenceGraph.
+    // These are mutable, written by ListElementBlockVariableReferenceGraph.
     private final List<Object> changedElementList;
     // The unassigned elements the classification in progress recomputed, so that each is recomputed once.
     private final List<Object> recomputedUnassignedElementList;
