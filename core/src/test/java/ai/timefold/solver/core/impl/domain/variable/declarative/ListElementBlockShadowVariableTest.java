@@ -1,6 +1,8 @@
 package ai.timefold.solver.core.impl.domain.variable.declarative;
 
+import static ai.timefold.solver.core.impl.domain.variable.declarative.DeclarativeShadowVariableAssertions.executeRandomListMove;
 import static ai.timefold.solver.core.impl.domain.variable.declarative.DeclarativeShadowVariableAssertions.solveWithFullAssert;
+import static ai.timefold.solver.core.impl.domain.variable.declarative.DeclarativeShadowVariableAssertions.solveWithFullAssertAndEveryListMove;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
@@ -301,41 +303,13 @@ class ListElementBlockShadowVariableTest {
         for (var seed = 0; seed < 30; seed++) {
             var random = new Random(seed);
             var solution = generateSolution(true);
-            var vehicles = solution.getVehicles();
-            var visits = solution.getVisits();
-
             var solutionMetaModel = TestdataMultiEntityChainSolution.buildMetaModel();
             var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataMultiEntityChainVehicle.class)
                     .listVariable("visits", TestdataMultiEntityChainVisit.class);
             var context = MoveTester.build(solutionMetaModel).using(solution);
-
             for (var moveIndex = 0; moveIndex < 40; moveIndex++) {
-                var unassignedVisits = visits.stream().filter(visit -> visit.getVehicle() == null).toList();
-                var assignedVehicles = vehicles.stream().filter(vehicle -> !vehicle.getVisits().isEmpty()).toList();
-                var moveType = random.nextInt(3);
-                if (moveType == 0 && !unassignedVisits.isEmpty()) {
-                    var visit = unassignedVisits.get(random.nextInt(unassignedVisits.size()));
-                    var vehicle = vehicles.get(random.nextInt(vehicles.size()));
-                    context.execute(Moves.assign(listVariableMetaModel, visit, vehicle,
-                            random.nextInt(vehicle.getVisits().size() + 1)));
-                } else if (moveType == 1 && !assignedVehicles.isEmpty()) {
-                    var vehicle = assignedVehicles.get(random.nextInt(assignedVehicles.size()));
-                    context.execute(Moves.unassign(listVariableMetaModel, vehicle,
-                            random.nextInt(vehicle.getVisits().size())));
-                } else if (!assignedVehicles.isEmpty()) {
-                    var sourceVehicle = assignedVehicles.get(random.nextInt(assignedVehicles.size()));
-                    var sourceIndex = random.nextInt(sourceVehicle.getVisits().size());
-                    var targetVehicle = vehicles.get(random.nextInt(vehicles.size()));
-                    var targetSize = targetVehicle.getVisits().size();
-                    var targetIndex = random.nextInt(targetVehicle == sourceVehicle ? targetSize : targetSize + 1);
-                    if (targetVehicle == sourceVehicle && targetIndex == sourceIndex) {
-                        continue;
-                    }
-                    context.execute(Moves.change(listVariableMetaModel, sourceVehicle, sourceIndex,
-                            targetVehicle, targetIndex));
-                } else {
-                    continue;
-                }
+                executeRandomListMove(context, listVariableMetaModel, TestdataMultiEntityChainVehicle::getVisits,
+                        solution.getVehicles(), solution.getVisits(), random);
                 assertShadowsAreAtFixedPoint(solution);
             }
         }
@@ -349,6 +323,13 @@ class ListElementBlockShadowVariableTest {
     @Test
     void solvingStaysAtFixedPointWithPreChainReadingElements() {
         assertShadowsAreAtFixedPoint(solve(generateSolution(true)));
+    }
+
+    @Test
+    void solvingWithEveryListMoveStaysAtFixedPoint() {
+        assertShadowsAreAtFixedPoint(solveWithFullAssertAndEveryListMove(TestdataMultiEntityChainSolution.class,
+                TestdataMultiEntityChainConstraintProvider.class, generateSolution(true),
+                TestdataMultiEntityChainVehicle.class, TestdataMultiEntityChainVisit.class));
     }
 
     /**

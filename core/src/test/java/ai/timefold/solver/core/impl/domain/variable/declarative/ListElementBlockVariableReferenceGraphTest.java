@@ -16,6 +16,7 @@ import ai.timefold.solver.core.preview.api.move.test.MoveTester;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVisit;
+import ai.timefold.solver.core.testutil.PlannerTestUtils;
 
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -166,6 +167,58 @@ class ListElementBlockVariableReferenceGraphTest {
         assertThat(solution.getVisits())
                 .allSatisfy(visit -> assertThat(visit.getCalledCount()).isEqualTo(2));
         assertThat(vehicleList.getLast().getEndTime()).isEqualTo(CHAIN_LENGTH * VISITS_PER_VEHICLE);
+    }
+
+    /**
+     * Like the single directional parent graph, each walk starts from an element whose sources changed
+     * and stops at the first element that is unchanged, so an element between two walks is left alone.
+     */
+    @Test
+    void swapWalksFromEachChangedElementUntilOneIsUnchanged() {
+        var v0 = new TestdataMultiEntityChainVisit("v0");
+        var v1 = new TestdataMultiEntityChainVisit("v1");
+        var v2 = new TestdataMultiEntityChainVisit("v2");
+        var v3 = new TestdataMultiEntityChainVisit("v3");
+        var v4 = new TestdataMultiEntityChainVisit("v4");
+        var vehicle = new TestdataMultiEntityChainVehicle("A", 0);
+        vehicle.setVisits(new ArrayList<>(List.of(v0, v1, v2, v3, v4)));
+        var solution = buildSolution(List.of(vehicle), null);
+        var solutionMetaModel = TestdataMultiEntityChainSolution.buildMetaModel();
+        var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataMultiEntityChainVehicle.class)
+                .listVariable("visits", TestdataMultiEntityChainVisit.class);
+        var context = MoveTester.build(solutionMetaModel).using(solution);
+        solution.getVisits().forEach(TestdataMultiEntityChainVisit::reset);
+
+        // All durations are equal, so only the swapped visits change their end time.
+        // Every visit but v2 changes its previous visit.
+        context.execute(Moves.swap(listVariableMetaModel, vehicle, 0, vehicle, 3));
+        assertThat(vehicle.getVisits()).containsExactly(v3, v1, v2, v0, v4);
+        assertThat(v3.getEndServiceTime()).isOne();
+        assertThat(v0.getEndServiceTime()).isEqualTo(4);
+        // One walk from v3 stops at v1, unchanged; another from v0 stops at v4, unchanged.
+        assertThat(List.of(v3, v1, v0, v4)).allSatisfy(visit -> assertThat(visit.getCalledCount()).isOne());
+        assertThat(v2.getCalledCount()).isZero();
+    }
+
+    /**
+     * A forced update changes nothing, so no element records itself;
+     * still, every element is recomputed, so that a corrupted one is caught.
+     */
+    @Test
+    void forcedUpdateRecomputesEveryElementOnce() {
+        var vehicleList = buildChain(false);
+        var solution = buildSolution(vehicleList, null);
+        var scoreDirector =
+                PlannerTestUtils.mockScoreDirector(TestdataMultiEntityChainSolution.buildSolutionDescriptor());
+        scoreDirector.setWorkingSolution(solution);
+        var visit = vehicleList.getFirst().getVisits().get(1);
+        var endServiceTime = visit.getEndServiceTime();
+        visit.setEndServiceTime(-1);
+        solution.getVisits().forEach(TestdataMultiEntityChainVisit::reset);
+
+        scoreDirector.forceUpdateShadowVariables();
+        assertThat(visit.getEndServiceTime()).isEqualTo(endServiceTime);
+        assertThat(solution.getVisits()).allSatisfy(v -> assertThat(v.getCalledCount()).isOne());
     }
 
     @Test

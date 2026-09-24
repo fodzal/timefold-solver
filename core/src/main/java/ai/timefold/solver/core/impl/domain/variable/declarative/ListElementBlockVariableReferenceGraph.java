@@ -23,8 +23,8 @@ import org.jspecify.annotations.Nullable;
  * a single {@link #updateChanged()} pass in topological order therefore walks each dirty chain
  * exactly once, after its pre-chain variables and before its post-chain variables.
  * This wrapper only routes the events the block nodes need:
- * it records the elements whose source variables changed and the list variables' change ranges,
- * classifies them into per-entity dirty ranges,
+ * it records the elements whose source variables changed and the list entities whose list changed,
+ * classifies the elements into seeds of their entities' chains,
  * and marks the dirty entities' block nodes before delegating the update.
  * It also marks the list entity's post-chain variables changed on a list change,
  * which the graph derives from the list element locators the block node skips.
@@ -124,10 +124,8 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
     @Override
     public void beforeListVariableChanged(VariableMetaModel<?, ?, ?> variableReference, Object entity,
             List<Object> elementList, int fromIndex, int toIndex) {
-        // The range is only recorded on the after event: an element that leaves the list keeps no
-        // trace of it there, but the list variable state supply changes its inverse and its previous
-        // or next element, and afterVariableChanged records it from those.
-        // ListElementBlockShadowVariableTest#removingTheLastElementOfARouteUpdatesItsEntity pins it.
+        // Nothing is recorded here: the list variable state changes the inverse and the previous or next
+        // element of the elements that leave the list, and afterVariableChanged records them from those.
         innerGraph.beforeListVariableChanged(variableReference, entity, elementList, fromIndex, toIndex);
     }
 
@@ -138,10 +136,7 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
         // before anything is recorded.
         innerGraph.afterListVariableChanged(variableReference, entity, elementList, fromIndex, toIndex);
         if (fromIndex < toIndex) {
-            // The changed elements are classified into a dirty range, and every element between
-            // these two ends up inside it, whichever way round the chain order runs.
-            blockUpdater.recordChangedElement(elementList.get(fromIndex));
-            blockUpdater.recordChangedElement(elementList.get(toIndex - 1));
+            blockUpdater.recordChangedList(entity);
         }
         markPostChainVariablesChanged(entity);
     }

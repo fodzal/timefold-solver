@@ -84,6 +84,53 @@ class ListElementBlockLoopShadowVariableTest {
     }
 
     /**
+     * The elements that leave a vehicle in a dependency loop become consistent again,
+     * whether they move to a vehicle outside of it or are unassigned.
+     */
+    @Test
+    void elementsLeavingALoopedVehicleBecomeConsistent() {
+        var a1 = new TestdataChainLoopVisit("a1", 2);
+        var a2 = new TestdataChainLoopVisit("a2", 3);
+        var b1 = new TestdataChainLoopVisit("b1", 4);
+        var c1 = new TestdataChainLoopVisit("c1", 1);
+
+        var vehicleA = new TestdataChainLoopVehicle("A", 0);
+        var vehicleB = new TestdataChainLoopVehicle("B", 10);
+        var vehicleC = new TestdataChainLoopVehicle("C", 20);
+        vehicleA.setVisits(new ArrayList<>(List.of(a1, a2)));
+        vehicleB.setVisits(new ArrayList<>(List.of(b1)));
+        vehicleC.setVisits(new ArrayList<>(List.of(c1)));
+
+        var solution = new TestdataChainLoopSolution();
+        solution.setVehicles(List.of(vehicleA, vehicleB, vehicleC));
+        solution.setVisits(List.of(a1, a2, b1, c1));
+
+        var solutionMetaModel = TestdataChainLoopSolution.buildMetaModel();
+        var vehicleMetaModel = solutionMetaModel.genuineEntity(TestdataChainLoopVehicle.class);
+        var previousVehicleMetaModel = vehicleMetaModel.basicVariable("previousVehicle", TestdataChainLoopVehicle.class);
+        var listVariableMetaModel = vehicleMetaModel.listVariable("visits", TestdataChainLoopVisit.class);
+        var context = MoveTester.build(solutionMetaModel).using(solution);
+
+        // A after B, then B after A: the loop takes both routes down.
+        context.execute(Moves.change(previousVehicleMetaModel, vehicleA, vehicleB));
+        context.execute(Moves.change(previousVehicleMetaModel, vehicleB, vehicleA));
+        assertThat(a1.getInconsistent()).isTrue();
+        assertThat(a2.getInconsistent()).isTrue();
+
+        // a2 moves to the end of C's route, outside the loop; a1 stays in it.
+        context.execute(Moves.change(listVariableMetaModel, vehicleA, 1, vehicleC, 1));
+        assertThat(a2.getInconsistent()).isFalse();
+        assertThat(a2.getEndServiceTime()).isEqualTo(24);
+        assertThat(a1.getInconsistent()).isTrue();
+
+        // Unassigned, a1 has no vehicle left to loop through.
+        context.execute(Moves.unassign(listVariableMetaModel, vehicleA, 0));
+        assertThat(a1.getInconsistent()).isFalse();
+        assertThat(a1.getEndServiceTime()).isNull();
+        assertThat(vehicleA.getInconsistent()).isTrue();
+    }
+
+    /**
      * A vehicle leaving a dependency loop gets back every element of its route, even when the same update
      * brings a consistent element to the head of that route, and the elements' recomputed values equal the
      * null the loop left them with, so that nothing seems to change along the way.
