@@ -21,7 +21,6 @@ import java.util.stream.Collectors;
 
 import ai.timefold.solver.core.api.function.TriFunction;
 import ai.timefold.solver.core.api.solver.SolutionManager;
-import ai.timefold.solver.core.impl.domain.solution.descriptor.InnerVariableMetaModel;
 import ai.timefold.solver.core.impl.domain.solution.descriptor.SolutionDescriptor;
 import ai.timefold.solver.core.impl.domain.variable.descriptor.VariableDescriptor;
 import ai.timefold.solver.core.impl.score.director.InnerScoreDirector;
@@ -259,50 +258,30 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         var elementConsistencyState = graphDescriptor.consistencyTracker()
                 .getDeclarativeEntityConsistencyState(sortedElementDescriptors.getFirst().getEntityDescriptor());
 
-        var listVariableState = Objects.requireNonNull(changedVariableNotifier.innerScoreDirector())
-                .<Object, Object> getListVariableState(listVariableDescriptor);
-        var blockUpdater = new ListElementBlockUpdater<>(listVariableDescriptor, listVariableState,
-                graphStructureAndDirection.direction() == ParentVariableType.PREVIOUS, ownerConsistencyState,
-                elementConsistencyState, sortedElementDescriptors, hasNoNonDeclarativeSourcesFromParent(elementDescriptorList));
-
-        // The pre-chain variables the elements read through their inverse: when one of them changes
-        // during an update, its entity's whole list must be walked, since any element may read it.
-        // These variables are declarative, so they only ever change through a notifier; wrapping it
-        // observes every such change, and the pre-chain to block node edges guarantee the whole
-        // chain is asked for before the entity's block node is processed.
+        // The pre-chain variables the elements read through their inverse:
+        // when one of them changes, its entity's whole list must be walked, since any element may read it.
         var elementReadVariableSet = new LinkedHashSet<VariableMetaModel<?, ?, ?>>();
-        // Identity set keyed by VariableDescriptor: the notifier below already receives it on every
-        // declarative variable write, so membership is checked directly instead of hopping through
-        // the variable's metamodel first.
-        var elementReadVariableDescriptorSet =
-                Collections.newSetFromMap(new IdentityHashMap<VariableDescriptor<Solution_>, Boolean>());
         for (var descriptor : elementDescriptorList) {
             for (var source : descriptor.getSources()) {
                 if (source.parentVariableType() == ParentVariableType.INVERSE) {
                     // Non-null: the detection rejects inverse sources targeting non-declarative variables.
-                    var preChainVariableMetaModel = Objects.requireNonNull(
-                            source.variableSourceReferences().getFirst().downstreamDeclarativeVariableMetamodel());
-                    elementReadVariableSet.add(preChainVariableMetaModel);
-                    @SuppressWarnings("unchecked")
-                    var preChainVariableDescriptor =
-                            ((InnerVariableMetaModel<Solution_>) preChainVariableMetaModel).variableDescriptor();
-                    elementReadVariableDescriptorSet.add(preChainVariableDescriptor);
+                    elementReadVariableSet.add(Objects.requireNonNull(
+                            source.variableSourceReferences().getFirst().downstreamDeclarativeVariableMetamodel()));
                 }
             }
         }
-        var flaggingNotifier = elementReadVariableSet.isEmpty() ? changedVariableNotifier
-                : new ChangedVariableNotifier<>(
-                        changedVariableNotifier.beforeVariableChanged(),
-                        (variableDescriptor, entity) -> {
-                            if (elementReadVariableDescriptorSet.contains(variableDescriptor)) {
-                                blockUpdater.recordWholeChainDirty(entity);
-                            }
-                            changedVariableNotifier.afterVariableChanged().accept(variableDescriptor, entity);
-                        },
-                        changedVariableNotifier.innerScoreDirector());
+        var preChainVariableDescriptorList = innerDescriptorList.stream()
+                .filter(descriptor -> elementReadVariableSet.contains(descriptor.getVariableMetaModel()))
+                .toList();
+        var listVariableState = Objects.requireNonNull(changedVariableNotifier.innerScoreDirector())
+                .<Object, Object> getListVariableState(listVariableDescriptor);
+        var blockUpdater = new ListElementBlockUpdater<>(listVariableDescriptor, listVariableState,
+                graphStructureAndDirection.direction() == ParentVariableType.PREVIOUS, ownerConsistencyState,
+                elementConsistencyState, sortedElementDescriptors, preChainVariableDescriptorList,
+                hasNoNonDeclarativeSourcesFromParent(elementDescriptorList));
 
         var innerGraphDescriptor = new GraphDescriptor<>(graphDescriptor.consistencyTracker(), solutionDescriptor,
-                graphDescriptor.ignoreInconsistentSolutions(), new VariableReferenceGraphBuilder<>(flaggingNotifier),
+                graphDescriptor.ignoreInconsistentSolutions(), new VariableReferenceGraphBuilder<>(changedVariableNotifier),
                 graphDescriptor.entities(), graphDescriptor.graphCreator());
         var builder = innerGraphDescriptor.variableReferenceGraphBuilder();
         builder.excludesListElements = true;
@@ -320,7 +299,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         var innerGraph = builder.build(innerGraphDescriptor.graphCreator(),
                 innerGraphDescriptor.ignoreInconsistentSolutions());
         return new ListElementBlockVariableReferenceGraph<>(innerGraph, blockUpdater, listVariableMetaModel,
-                elementEntityClass, elementConsistencyState, elementDescriptorList, flaggingNotifier,
+                elementEntityClass, elementConsistencyState, elementDescriptorList, changedVariableNotifier,
                 graphDescriptor.entities());
     }
 
