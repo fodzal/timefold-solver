@@ -21,6 +21,7 @@ import java.util.stream.Collectors;
 
 import ai.timefold.solver.core.api.function.TriFunction;
 import ai.timefold.solver.core.api.solver.SolutionManager;
+import ai.timefold.solver.core.impl.domain.solution.descriptor.InnerVariableMetaModel;
 import ai.timefold.solver.core.impl.domain.solution.descriptor.SolutionDescriptor;
 import ai.timefold.solver.core.impl.domain.variable.descriptor.VariableDescriptor;
 import ai.timefold.solver.core.impl.score.director.InnerScoreDirector;
@@ -281,12 +282,22 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         // observes every such change, and the pre-chain to block node edges guarantee the whole
         // chain is asked for before the entity's block node is processed.
         var elementReadVariableSet = new LinkedHashSet<VariableMetaModel<?, ?, ?>>();
+        // Identity set keyed by VariableDescriptor: the notifier below already receives it on every
+        // declarative variable write, so membership is checked directly instead of hopping through
+        // the variable's metamodel first.
+        var elementReadVariableDescriptorSet =
+                Collections.newSetFromMap(new IdentityHashMap<VariableDescriptor<Solution_>, Boolean>());
         for (var descriptor : elementDescriptorList) {
             for (var source : descriptor.getSources()) {
                 if (source.parentVariableType() == ParentVariableType.INVERSE) {
                     // Non-null: the detection rejects inverse sources targeting non-declarative variables.
-                    elementReadVariableSet.add(Objects.requireNonNull(
-                            source.variableSourceReferences().getFirst().downstreamDeclarativeVariableMetamodel()));
+                    var preChainVariableMetaModel = Objects.requireNonNull(
+                            source.variableSourceReferences().getFirst().downstreamDeclarativeVariableMetamodel());
+                    elementReadVariableSet.add(preChainVariableMetaModel);
+                    @SuppressWarnings("unchecked")
+                    var preChainVariableDescriptor =
+                            ((InnerVariableMetaModel<Solution_>) preChainVariableMetaModel).variableDescriptor();
+                    elementReadVariableDescriptorSet.add(preChainVariableDescriptor);
                 }
             }
         }
@@ -294,7 +305,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 : new ChangedVariableNotifier<>(
                         changedVariableNotifier.beforeVariableChanged(),
                         (variableDescriptor, entity) -> {
-                            if (elementReadVariableSet.contains(variableDescriptor.getVariableMetaModel())) {
+                            if (elementReadVariableDescriptorSet.contains(variableDescriptor)) {
                                 blockUpdater.recordWholeChainDirty(entity);
                             }
                             changedVariableNotifier.afterVariableChanged().accept(variableDescriptor, entity);
