@@ -352,10 +352,10 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
      * {@link VariableReferenceGraphBuilder#addFixedEdge(GraphNode, GraphNode) fixed} edges,
      * unless they close a dependency loop.
      * <p>
-     * Such a loop runs through the list's elements, which the arbitrary graph depends on through
-     * the dynamic edges of a {@link ParentVariableType#LIST_ELEMENT} source, where a move can
-     * break it. The block node has no such edges, since it stands for every element of its list
-     * entity, so failing fast on the loop would reject a model the arbitrary graph solves.
+     * The arbitrary graph may not have such a loop: there, each element variable has a node of its own,
+     * reached through the dynamic edges of a {@link ParentVariableType#LIST_ELEMENT} source, which a move
+     * can change. The block node stands for every variable of every element of its list entity instead,
+     * so failing fast on the loop would reject a model the arbitrary graph solves.
      *
      * @return true to keep building the block graph, false to fall back to the arbitrary graph,
      *         which fails the build fast itself on a fixed loop.

@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
+import ai.timefold.solver.core.impl.domain.variable.ListVariableState;
+import ai.timefold.solver.core.impl.score.director.InnerScoreDirector;
 import ai.timefold.solver.core.preview.api.move.builtin.Moves;
 import ai.timefold.solver.core.preview.api.move.test.MoveTester;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainConstraintProvider;
@@ -23,8 +25,12 @@ import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.Tes
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataFactCycleSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataFactCycleVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataFactCycleVisit;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_post_chain_reader.TestdataPostChainReaderSolution;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_post_chain_reader.TestdataPostChainReaderVehicle;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_post_chain_reader.TestdataPostChainReaderVisit;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 /**
  * Tests {@link ListElementBlockVariableReferenceGraph} on a model where
@@ -292,6 +298,54 @@ class ListElementBlockShadowVariableTest {
         assertThatCode(() -> MoveTester.build(TestdataMultiEntityChainSolution.buildMetaModel()).using(solution))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("fixed dependency loops");
+    }
+
+    /**
+     * A visit reads the end time of its own vehicle, which the visits source:
+     * the block node would have to be computed both before and after that end time,
+     * so the build falls back to the arbitrary graph, whose per-visit nodes do not loop.
+     */
+    @Test
+    void elementsReadingAPostChainVariableFallBack() {
+        var v1 = new TestdataPostChainReaderVisit("v1", 2);
+        var v2 = new TestdataPostChainReaderVisit("v2", 3);
+        var v3 = new TestdataPostChainReaderVisit("v3", 4); // Initially unassigned.
+        var vehicleA = new TestdataPostChainReaderVehicle("A");
+        var vehicleB = new TestdataPostChainReaderVehicle("B");
+        vehicleA.setVisits(new ArrayList<>(List.of(v1, v2)));
+        var solution = new TestdataPostChainReaderSolution();
+        solution.setVehicles(List.of(vehicleA, vehicleB));
+        solution.setVisits(List.of(v1, v2, v3));
+
+        var solutionDescriptor = TestdataPostChainReaderSolution.buildSolutionDescriptor();
+        var entities = new Object[] { vehicleA, vehicleB, v1, v2, v3 };
+        var graphStructureAndDirection = GraphStructure.determineGraphStructure(solutionDescriptor, entities);
+        var scoreDirector = Mockito.mock(InnerScoreDirector.class);
+        Mockito.when(scoreDirector.getListVariableState(Mockito.any())).thenReturn(Mockito.mock(ListVariableState.class));
+        var graph = DefaultShadowVariableSessionFactory.buildGraphForStructureAndDirection(graphStructureAndDirection,
+                new DefaultShadowVariableSessionFactory.GraphDescriptor<>(solutionDescriptor,
+                        ChangedVariableNotifier.of(scoreDirector), entities));
+        assertThat(graph).isNotInstanceOf(ListElementBlockVariableReferenceGraph.class);
+
+        var solutionMetaModel = TestdataPostChainReaderSolution.buildMetaModel();
+        var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataPostChainReaderVehicle.class)
+                .listVariable("visits", TestdataPostChainReaderVisit.class);
+        var context = MoveTester.build(solutionMetaModel).using(solution);
+        assertThat(vehicleA.getEndTime()).isEqualTo(5);
+        assertThat(v1.getSlack()).isEqualTo(3);
+        assertThat(v2.getSlack()).isZero();
+
+        context.execute(Moves.assign(listVariableMetaModel, v3, vehicleA, 1));
+        assertThat(vehicleA.getEndTime()).isEqualTo(9);
+        assertThat(v1.getSlack()).isEqualTo(7);
+        assertThat(v3.getSlack()).isEqualTo(3);
+        context.execute(Moves.change(listVariableMetaModel, vehicleA, 0, vehicleB, 0));
+        assertThat(vehicleB.getEndTime()).isEqualTo(2);
+        assertThat(v1.getSlack()).isZero();
+        DeclarativeShadowVariableAssertions.assertShadowsAreAtFixedPoint(solution,
+                s -> s.getVehicles().stream().map(TestdataPostChainReaderVehicle::getEndTime).toList(),
+                s -> s.getVisits().stream().map(TestdataPostChainReaderVisit::getEndServiceTime).toList(),
+                s -> s.getVisits().stream().map(TestdataPostChainReaderVisit::getSlack).toList());
     }
 
     /**
