@@ -5,7 +5,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.ArrayList;
 import java.util.List;
 
+import ai.timefold.solver.core.impl.domain.solution.descriptor.DefaultPlanningListVariableMetaModel;
 import ai.timefold.solver.core.impl.domain.variable.ListVariableState;
+import ai.timefold.solver.core.impl.heuristic.move.SelectorBasedCompositeMove;
+import ai.timefold.solver.core.impl.heuristic.selector.move.generic.list.SelectorBasedListChangeMove;
+import ai.timefold.solver.core.impl.heuristic.selector.move.generic.list.SelectorBasedListUnassignMove;
 import ai.timefold.solver.core.impl.score.director.InnerScoreDirector;
 import ai.timefold.solver.core.preview.api.move.builtin.Moves;
 import ai.timefold.solver.core.preview.api.move.test.MoveTester;
@@ -162,6 +166,47 @@ class ListElementBlockVariableReferenceGraphTest {
         assertThat(solution.getVisits())
                 .allSatisfy(visit -> assertThat(visit.getCalledCount()).isEqualTo(2));
         assertThat(vehicleList.getLast().getEndTime()).isEqualTo(CHAIN_LENGTH * VISITS_PER_VEHICLE);
+    }
+
+    @Test
+    void unassigningAnElementComputesItOnce() {
+        var vehicleList = buildChain(false);
+        var solution = buildSolution(vehicleList, null);
+        var solutionMetaModel = TestdataMultiEntityChainSolution.buildMetaModel();
+        var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataMultiEntityChainVehicle.class)
+                .listVariable("visits", TestdataMultiEntityChainVisit.class);
+        var context = MoveTester.build(solutionMetaModel).using(solution);
+        var vehicle = vehicleList.getFirst();
+        var visit = vehicle.getVisits().get(1);
+        solution.getVisits().forEach(TestdataMultiEntityChainVisit::reset);
+
+        // Its vehicle and previous visit both change, one event each.
+        context.execute(Moves.unassign(listVariableMetaModel, vehicle, 1));
+        assertThat(visit.getEndServiceTime()).isNull();
+        assertThat(visit.getCalledCount()).isOne();
+    }
+
+    @Test
+    void anElementChangedThenUnassignedInOneUpdateIsComputedOnce() {
+        var vehicleList = buildChain(false);
+        var solution = buildSolution(vehicleList, null);
+        var solutionMetaModel = TestdataMultiEntityChainSolution.buildMetaModel();
+        var listVariableDescriptor =
+                ((DefaultPlanningListVariableMetaModel<TestdataMultiEntityChainSolution, TestdataMultiEntityChainVehicle, TestdataMultiEntityChainVisit>) solutionMetaModel
+                        .genuineEntity(TestdataMultiEntityChainVehicle.class)
+                        .listVariable("visits", TestdataMultiEntityChainVisit.class))
+                        .variableDescriptor();
+        var context = MoveTester.build(solutionMetaModel).using(solution);
+        var vehicle = vehicleList.getFirst();
+        var visit = vehicle.getVisits().get(1);
+        solution.getVisits().forEach(TestdataMultiEntityChainVisit::reset);
+
+        // In one update: the visit's predecessor moves to another vehicle, then the visit is unassigned.
+        context.execute(SelectorBasedCompositeMove.buildMove(
+                new SelectorBasedListChangeMove<>(listVariableDescriptor, vehicle, 0, vehicleList.getLast(), 0),
+                new SelectorBasedListUnassignMove<>(listVariableDescriptor, vehicle, 0)));
+        assertThat(visit.getEndServiceTime()).isNull();
+        assertThat(visit.getCalledCount()).isOne();
     }
 
     private static List<TestdataMultiEntityChainVehicle> buildChain(boolean endTimeIncludesPreviousEndTime) {

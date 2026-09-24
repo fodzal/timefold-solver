@@ -49,6 +49,8 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
 
     // Mutable dirty state, written by ListElementBlockVariableReferenceGraph.
     private final List<Object> changedElementList;
+    // The unassigned elements the classification in progress recomputed, so that each is recomputed once.
+    private final List<Object> recomputedUnassignedElementList;
     private final IdentityHashMap<Object, ChainState> ownerToChainStateMap;
     private final List<ChainState> dirtyChainStateList;
 
@@ -71,6 +73,7 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
         this.elementConsistencyState = elementConsistencyState;
         this.canTerminateEarly = canTerminateEarly;
         this.changedElementList = new ArrayList<>();
+        this.recomputedUnassignedElementList = new ArrayList<>();
         this.ownerToChainStateMap = new IdentityHashMap<>();
         this.dirtyChainStateList = new ArrayList<>();
 
@@ -199,7 +202,10 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
      * classified into a per-owner dirty range by {@link #classifyChangedElements}.
      */
     void recordChangedElement(Object element) {
-        changedElementList.add(element);
+        // An element's list variable state changes all at once, so its events come in a row.
+        if (changedElementList.isEmpty() || changedElementList.getLast() != element) {
+            changedElementList.add(element);
+        }
     }
 
     /**
@@ -228,11 +234,10 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
         for (var element : changedElementList) {
             var owner = listVariableState.getInverseSingleton(element);
             if (owner == null) {
-                if (!elementConsistencyState.isEntityConsistent(element)) {
-                    elementConsistencyState.setEntityIsInconsistent(changedVariableNotifier, element, false);
-                }
-                for (var updater : elementUpdaters) {
-                    updater.updateIfChanged(element, changedVariableNotifier);
+                // A move changing an element before unassigning it records it twice, apart.
+                if (!containsSame(recomputedUnassignedElementList, element)) {
+                    recomputedUnassignedElementList.add(element);
+                    recomputeUnassignedElement(element, changedVariableNotifier);
                 }
                 continue;
             }
@@ -243,9 +248,30 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
             markDirty(chainState);
         }
         changedElementList.clear();
+        recomputedUnassignedElementList.clear();
         for (var chainState : dirtyChainStateList) {
             dirtyOwnerConsumer.accept(chainState.owner);
         }
+    }
+
+    private void recomputeUnassignedElement(Object element, ChangedVariableNotifier<Solution_> changedVariableNotifier) {
+        if (!elementConsistencyState.isEntityConsistent(element)) {
+            elementConsistencyState.setEntityIsInconsistent(changedVariableNotifier, element, false);
+        }
+        for (var updater : elementUpdaters) {
+            updater.updateIfChanged(element, changedVariableNotifier);
+        }
+    }
+
+    @SuppressWarnings("ForLoopReplaceableByForEach")
+    private static boolean containsSame(List<Object> elementList, Object element) {
+        // Avoid creation of iterators on the hot path.
+        for (var i = 0; i < elementList.size(); i++) {
+            if (elementList.get(i) == element) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
