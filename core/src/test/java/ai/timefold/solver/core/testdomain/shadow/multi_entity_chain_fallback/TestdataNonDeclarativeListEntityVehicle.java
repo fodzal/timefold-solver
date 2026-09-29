@@ -8,21 +8,21 @@ import ai.timefold.solver.core.api.domain.variable.PlanningListVariable;
 import ai.timefold.solver.core.testdomain.TestdataObject;
 
 /**
- * Owns the list variable but has no declarative shadow variables,
+ * Declares the list variable but has no declarative shadow variables,
  * so the declarative entity classes are the visit and the depot.
  */
 @PlanningEntity
-public class TestdataNonOwnerVehicle extends TestdataObject {
+public class TestdataNonDeclarativeListEntityVehicle extends TestdataObject {
 
     int departureTime;
 
     @PlanningListVariable(allowsUnassignedValues = true)
-    List<TestdataNonOwnerVisit> visits = new ArrayList<>();
+    List<TestdataNonDeclarativeListEntityVisit> visits = new ArrayList<>();
 
-    public TestdataNonOwnerVehicle() {
+    public TestdataNonDeclarativeListEntityVehicle() {
     }
 
-    public TestdataNonOwnerVehicle(String code, int departureTime) {
+    public TestdataNonDeclarativeListEntityVehicle(String code, int departureTime) {
         super(code);
         this.departureTime = departureTime;
     }
@@ -35,11 +35,11 @@ public class TestdataNonOwnerVehicle extends TestdataObject {
         this.departureTime = departureTime;
     }
 
-    public List<TestdataNonOwnerVisit> getVisits() {
+    public List<TestdataNonDeclarativeListEntityVisit> getVisits() {
         return visits;
     }
 
-    public void setVisits(List<TestdataNonOwnerVisit> visits) {
+    public void setVisits(List<TestdataNonDeclarativeListEntityVisit> visits) {
         this.visits = visits;
     }
 }

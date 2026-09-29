@@ -11,51 +11,52 @@ import ai.timefold.solver.core.impl.domain.solution.descriptor.SolutionDescripto
 import ai.timefold.solver.core.preview.api.domain.metamodel.PlanningSolutionMetaModel;
 
 @PlanningSolution
-public class TestdataNonOwnerSolution {
+public class TestdataNonDeclarativeListEntitySolution {
 
-    public static SolutionDescriptor<TestdataNonOwnerSolution> buildSolutionDescriptor() {
-        return SolutionDescriptor.buildSolutionDescriptor(TestdataNonOwnerSolution.class,
-                TestdataNonOwnerVehicle.class, TestdataNonOwnerVisit.class, TestdataNonOwnerDepot.class);
+    public static SolutionDescriptor<TestdataNonDeclarativeListEntitySolution> buildSolutionDescriptor() {
+        return SolutionDescriptor.buildSolutionDescriptor(TestdataNonDeclarativeListEntitySolution.class,
+                TestdataNonDeclarativeListEntityVehicle.class, TestdataNonDeclarativeListEntityVisit.class,
+                TestdataNonDeclarativeListEntityDepot.class);
     }
 
-    public static PlanningSolutionMetaModel<TestdataNonOwnerSolution> buildMetaModel() {
+    public static PlanningSolutionMetaModel<TestdataNonDeclarativeListEntitySolution> buildMetaModel() {
         return buildSolutionDescriptor().getMetaModel();
     }
 
     @PlanningEntityCollectionProperty
-    List<TestdataNonOwnerVehicle> vehicles;
+    List<TestdataNonDeclarativeListEntityVehicle> vehicles;
 
     @PlanningEntityCollectionProperty
     @ValueRangeProvider
-    List<TestdataNonOwnerVisit> visits;
+    List<TestdataNonDeclarativeListEntityVisit> visits;
 
     @PlanningEntityCollectionProperty
-    List<TestdataNonOwnerDepot> depots;
+    List<TestdataNonDeclarativeListEntityDepot> depots;
 
     @PlanningScore
     SimpleScore score;
 
-    public List<TestdataNonOwnerVehicle> getVehicles() {
+    public List<TestdataNonDeclarativeListEntityVehicle> getVehicles() {
         return vehicles;
     }
 
-    public void setVehicles(List<TestdataNonOwnerVehicle> vehicles) {
+    public void setVehicles(List<TestdataNonDeclarativeListEntityVehicle> vehicles) {
         this.vehicles = vehicles;
     }
 
-    public List<TestdataNonOwnerVisit> getVisits() {
+    public List<TestdataNonDeclarativeListEntityVisit> getVisits() {
         return visits;
     }
 
-    public void setVisits(List<TestdataNonOwnerVisit> visits) {
+    public void setVisits(List<TestdataNonDeclarativeListEntityVisit> visits) {
         this.visits = visits;
     }
 
-    public List<TestdataNonOwnerDepot> getDepots() {
+    public List<TestdataNonDeclarativeListEntityDepot> getDepots() {
         return depots;
     }
 
-    public void setDepots(List<TestdataNonOwnerDepot> depots) {
+    public void setDepots(List<TestdataNonDeclarativeListEntityDepot> depots) {
         this.depots = depots;
     }
 

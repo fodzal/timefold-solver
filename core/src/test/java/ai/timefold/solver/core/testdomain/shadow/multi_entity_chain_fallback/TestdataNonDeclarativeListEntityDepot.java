@@ -9,21 +9,21 @@ import ai.timefold.solver.core.api.domain.variable.ShadowVariable;
 import ai.timefold.solver.core.testdomain.TestdataObject;
 
 /**
- * A declarative entity class that does not own the list variable.
+ * A declarative entity class that does not declare the list variable.
  */
 @PlanningEntity
-public class TestdataNonOwnerDepot extends TestdataObject {
+public class TestdataNonDeclarativeListEntityDepot extends TestdataObject {
 
-    List<TestdataNonOwnerDepot> otherDepots = new ArrayList<>();
+    List<TestdataNonDeclarativeListEntityDepot> otherDepots = new ArrayList<>();
     int baseTime;
 
     @ShadowVariable(supplierName = "openTimeSupplier")
     Integer openTime;
 
-    public TestdataNonOwnerDepot() {
+    public TestdataNonDeclarativeListEntityDepot() {
     }
 
-    public TestdataNonOwnerDepot(String code, int baseTime) {
+    public TestdataNonDeclarativeListEntityDepot(String code, int baseTime) {
         super(code);
         this.baseTime = baseTime;
         // A depot without other depots has an empty fact collection as its only source,
@@ -43,11 +43,11 @@ public class TestdataNonOwnerDepot extends TestdataObject {
         return max;
     }
 
-    public List<TestdataNonOwnerDepot> getOtherDepots() {
+    public List<TestdataNonDeclarativeListEntityDepot> getOtherDepots() {
         return otherDepots;
     }
 
-    public void setOtherDepots(List<TestdataNonOwnerDepot> otherDepots) {
+    public void setOtherDepots(List<TestdataNonDeclarativeListEntityDepot> otherDepots) {
         this.otherDepots = otherDepots;
     }
 

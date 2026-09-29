@@ -43,10 +43,10 @@ import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.Tes
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataExtendedSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataExtendedVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataExtendedVisit;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonOwnerDepot;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonOwnerSolution;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonOwnerVehicle;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonOwnerVisit;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonDeclarativeListEntityDepot;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonDeclarativeListEntitySolution;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonDeclarativeListEntityVehicle;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataNonDeclarativeListEntityVisit;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataWatchedVisitsSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataWatchedVisitsVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataWatchedVisitsVisit;
@@ -228,14 +228,14 @@ class GraphStructureTest {
     }
 
     @Test
-    void multiEntityChainWithNonListOwnerEntity() {
-        var vehicle = new TestdataNonOwnerVehicle("A", 0);
-        var visit = new TestdataNonOwnerVisit("v1", 1);
-        var depot = new TestdataNonOwnerDepot("D", 0);
+    void multiEntityChainWithNonDeclarativeListEntity() {
+        var vehicle = new TestdataNonDeclarativeListEntityVehicle("A", 0);
+        var visit = new TestdataNonDeclarativeListEntityVisit("v1", 1);
+        var depot = new TestdataNonDeclarativeListEntityDepot("D", 0);
         // The block node reports its looped status through the list entity's consistency state,
         // so a list entity without declarative shadow variables falls back to the arbitrary graph.
         assertThat(GraphStructure.determineGraphStructure(
-                TestdataNonOwnerSolution.buildSolutionDescriptor(), vehicle, visit, depot))
+                TestdataNonDeclarativeListEntitySolution.buildSolutionDescriptor(), vehicle, visit, depot))
                 .hasFieldOrPropertyWithValue("structure", ARBITRARY)
                 .hasFieldOrPropertyWithValue("blockedElementClass", null);
     }

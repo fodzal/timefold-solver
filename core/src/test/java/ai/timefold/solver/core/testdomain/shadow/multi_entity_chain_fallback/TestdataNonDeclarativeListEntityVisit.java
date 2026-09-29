@@ -8,23 +8,23 @@ import ai.timefold.solver.core.api.domain.variable.ShadowVariable;
 import ai.timefold.solver.core.testdomain.TestdataObject;
 
 @PlanningEntity
-public class TestdataNonOwnerVisit extends TestdataObject {
+public class TestdataNonDeclarativeListEntityVisit extends TestdataObject {
 
     @InverseRelationShadowVariable(sourceVariableName = "visits")
-    TestdataNonOwnerVehicle vehicle;
+    TestdataNonDeclarativeListEntityVehicle vehicle;
 
     @PreviousElementShadowVariable(sourceVariableName = "visits")
-    TestdataNonOwnerVisit previousVisit;
+    TestdataNonDeclarativeListEntityVisit previousVisit;
 
     int duration = 1;
 
     @ShadowVariable(supplierName = "endServiceTimeSupplier")
     Integer endServiceTime;
 
-    public TestdataNonOwnerVisit() {
+    public TestdataNonDeclarativeListEntityVisit() {
     }
 
-    public TestdataNonOwnerVisit(String code, int duration) {
+    public TestdataNonDeclarativeListEntityVisit(String code, int duration) {
         super(code);
         this.duration = duration;
     }
@@ -49,19 +49,19 @@ public class TestdataNonOwnerVisit extends TestdataObject {
         this.duration = duration;
     }
 
-    public TestdataNonOwnerVehicle getVehicle() {
+    public TestdataNonDeclarativeListEntityVehicle getVehicle() {
         return vehicle;
     }
 
-    public void setVehicle(TestdataNonOwnerVehicle vehicle) {
+    public void setVehicle(TestdataNonDeclarativeListEntityVehicle vehicle) {
         this.vehicle = vehicle;
     }
 
-    public TestdataNonOwnerVisit getPreviousVisit() {
+    public TestdataNonDeclarativeListEntityVisit getPreviousVisit() {
         return previousVisit;
     }
 
-    public void setPreviousVisit(TestdataNonOwnerVisit previousVisit) {
+    public void setPreviousVisit(TestdataNonDeclarativeListEntityVisit previousVisit) {
         this.previousVisit = previousVisit;
     }
 
