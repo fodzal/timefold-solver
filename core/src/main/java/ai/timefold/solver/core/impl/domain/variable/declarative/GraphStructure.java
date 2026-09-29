@@ -228,11 +228,11 @@ public enum GraphStructure {
             return null;
         }
         var elementEntityClass = chainDirection.elementEntityClass();
-        var ownerEntityDescriptor = listVariableDescriptor.getEntityDescriptor();
-        var ownerEntityClass = ownerEntityDescriptor.getEntityClass();
+        var listEntityDescriptor = listVariableDescriptor.getEntityDescriptor();
+        var listEntityClass = listEntityDescriptor.getEntityClass();
         if (!elementEntityClass.isAssignableFrom(listVariableDescriptor.getElementType())
-                || ownerEntityClass.isAssignableFrom(elementEntityClass)
-                || elementEntityClass.isAssignableFrom(ownerEntityClass)) {
+                || listEntityClass.isAssignableFrom(elementEntityClass)
+                || elementEntityClass.isAssignableFrom(listEntityClass)) {
             // The block node walks the list entity's list and classifies entities with instanceof,
             // so the element class must cover the list's elements and be distinct from the list entity.
             return null;
@@ -254,7 +254,7 @@ public enum GraphStructure {
                 return null;
             }
         }
-        if (ownerEntityDescriptor.getShadowVariableDescriptors().stream()
+        if (listEntityDescriptor.getShadowVariableDescriptors().stream()
                 .noneMatch(variableDescriptor -> variableDescriptor instanceof DeclarativeShadowVariableDescriptor<?>)) {
             // The block node tracks its looped status through the list entity's consistency state,
             // which only exists when the list entity has declarative shadow variables of its own.

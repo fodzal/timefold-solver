@@ -28,7 +28,7 @@ import org.jspecify.annotations.Nullable;
  * exactly once, after its pre-chain variables and before its post-chain variables.
  * This wrapper only routes the events the block nodes need:
  * it records the elements whose source variables changed and the list entities whose list changed,
- * classifies the elements into seeds of their entities' chains,
+ * classifies the elements by the chain of their entity,
  * and marks the dirty entities' block nodes before delegating the update.
  * It also marks the list entity's post-chain variables changed on a list change,
  * which the graph derives from the list element locators the block node skips.
@@ -50,13 +50,13 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
     private final Set<VariableMetaModel<?, ?, ?>> monitoredSourceVariableSet;
     private final ChangedVariableNotifier<Solution_> changedVariableNotifier;
     /**
-     * Owner to block node. Hoisted at construction because the per-variable map is keyed by
+     * List entity to block node. Hoisted at construction because the per-variable map is keyed by
      * {@link VariableMetaModel}, whose equals is expensive, and this lookup runs for every dirty chain.
      */
-    private final Map<Object, GraphNode<Solution_>> ownerToBlockNodeMap;
+    private final Map<Object, GraphNode<Solution_>> listEntityToBlockNodeMap;
     /**
      * The list variable's after processors, which mark the list entity's post-chain variables changed.
-     * Hoisted at construction for the same reason as {@link #ownerToBlockNodeMap}.
+     * Hoisted at construction for the same reason as {@link #listEntityToBlockNodeMap}.
      */
     private final List<BiConsumer<AbstractVariableReferenceGraph<Solution_, ?>, Object>> listVariableAfterProcessorList;
 
@@ -83,7 +83,7 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
         this.listVariableName = listVariableMetaModel.name();
         this.elementEntityClass = elementEntityClass;
         this.changedVariableNotifier = changedVariableNotifier;
-        this.ownerToBlockNodeMap = innerNodeGraph == null ? Map.of()
+        this.listEntityToBlockNodeMap = innerNodeGraph == null ? Map.of()
                 : innerNodeGraph.variableReferenceToContainingNodeMap.getOrDefault(listVariableMetaModel, Map.of());
         this.listVariableAfterProcessorList = innerNodeGraph == null ? List.of()
                 : innerNodeGraph.variableReferenceToAfterProcessor.getOrDefault(listVariableMetaModel, List.of());
@@ -173,7 +173,8 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
             var involvedVariableSet = new LinkedHashSet<EntityVariablePair>();
             for (var entityVariablePair : innerVariableLoop.involvedVariableSet()) {
                 var entity = entityVariablePair.entity();
-                if (entityVariablePair.variableName().equals(listVariableName) && ownerToBlockNodeMap.containsKey(entity)) {
+                if (entityVariablePair.variableName().equals(listVariableName)
+                        && listEntityToBlockNodeMap.containsKey(entity)) {
                     blockUpdater.addElementVariables(entity, involvedVariableSet);
                 } else {
                     involvedVariableSet.add(entityVariablePair);
@@ -197,12 +198,12 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
         nodeGraph.processEntity(listVariableAfterProcessorList, entity);
     }
 
-    private void markBlockNodeChanged(Object owner) {
+    private void markBlockNodeChanged(Object listEntity) {
         var nodeGraph = innerNodeGraph;
         if (nodeGraph == null) {
             return;
         }
         // Every list entity of the solution the graph was built for has a block node.
-        nodeGraph.markChanged(Objects.requireNonNull(ownerToBlockNodeMap.get(owner)));
+        nodeGraph.markChanged(Objects.requireNonNull(listEntityToBlockNodeMap.get(listEntity)));
     }
 }
