@@ -238,9 +238,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 continue;
             }
             innerDescriptorList.add(descriptor);
-            if (!entityDescriptor.getEntityClass().isAssignableFrom(listEntityClass)) {
-                continue;
-            }
+            // Only the list entity class may source its list's elements.
             for (var source : descriptor.getSources()) {
                 if (source.parentVariableType() == ParentVariableType.LIST_ELEMENT) {
                     postChainVariableIdList.add(descriptor.getVariableMetaModel());
@@ -330,18 +328,11 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             builder.addVariableReferenceEntity(listEntity, List.of(blockUpdater));
             blockUpdater.addListEntity(listEntity);
             var blockNode = builder.lookupOrError(listVariableMetaModel, listEntity);
-            // lookupOrNull: an extended model may declare the variable on a subclass only.
             for (var preChainVariableId : preChainVariableIdSet) {
-                var preChainNode = builder.lookupOrNull(preChainVariableId, listEntity);
-                if (preChainNode != null) {
-                    blockEdgeList.add(new BlockEdge<>(preChainNode, blockNode));
-                }
+                blockEdgeList.add(new BlockEdge<>(builder.lookupOrError(preChainVariableId, listEntity), blockNode));
             }
             for (var postChainVariableId : postChainVariableIdList) {
-                var postChainNode = builder.lookupOrNull(postChainVariableId, listEntity);
-                if (postChainNode != null) {
-                    blockEdgeList.add(new BlockEdge<>(blockNode, postChainNode));
-                }
+                blockEdgeList.add(new BlockEdge<>(blockNode, builder.lookupOrError(postChainVariableId, listEntity)));
             }
         }
         return blockEdgeList;
