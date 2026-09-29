@@ -322,9 +322,8 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 continue;
             }
             // Keyed by the list variable itself, so that a lookup by variable and entity finds it.
-            // AbstractVariableReferenceGraph's constructor replays afterVariableChanged for every
-            // variable an after processor was registered for, the list variable among them, which is
-            // what marks every block node changed for the initial walk.
+            // ListElementBlockVariableReferenceGraph's constructor records every element,
+            // which marks the block node of every non-empty list for the initial walk.
             builder.addVariableReferenceEntity(listEntity, List.of(blockUpdater));
             blockUpdater.addListEntity(listEntity);
             var blockNode = builder.lookupOrError(listVariableMetaModel, listEntity);

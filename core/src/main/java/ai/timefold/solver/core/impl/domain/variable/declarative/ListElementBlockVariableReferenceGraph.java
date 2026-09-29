@@ -50,13 +50,12 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
     private final Set<VariableMetaModel<?, ?, ?>> monitoredSourceVariableSet;
     private final ChangedVariableNotifier<Solution_> changedVariableNotifier;
     /**
-     * List entity to block node. Hoisted at construction because the per-variable map is keyed by
-     * {@link VariableMetaModel}, whose equals is expensive, and this lookup runs for every dirty chain.
+     * List entity to block node. Hoisted at construction to save a lookup by variable for every dirty chain.
      */
     private final Map<Object, GraphNode<Solution_>> listEntityToBlockNodeMap;
     /**
      * The list variable's after processors, which mark the list entity's post-chain variables changed.
-     * Hoisted at construction for the same reason as {@link #listEntityToBlockNodeMap}.
+     * Hoisted at construction to save a lookup by variable for every list change.
      */
     private final List<BiConsumer<AbstractVariableReferenceGraph<Solution_, ?>, Object>> listVariableAfterProcessorList;
 
