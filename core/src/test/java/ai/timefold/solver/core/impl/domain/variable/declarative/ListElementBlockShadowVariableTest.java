@@ -17,9 +17,9 @@ import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMult
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVisit;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_post_chain_reader.TestdataPostChainReaderSolution;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_post_chain_reader.TestdataPostChainReaderVehicle;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_post_chain_reader.TestdataPostChainReaderVisit;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_slack.TestdataMultiEntityChainSlackSolution;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_slack.TestdataMultiEntityChainSlackVehicle;
+import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_slack.TestdataMultiEntityChainSlackVisit;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -228,17 +228,17 @@ class ListElementBlockShadowVariableTest {
      */
     @Test
     void elementsReadingAPostChainVariableFallBack() {
-        var v1 = new TestdataPostChainReaderVisit("v1", 2);
-        var v2 = new TestdataPostChainReaderVisit("v2", 3);
-        var v3 = new TestdataPostChainReaderVisit("v3", 4); // Initially unassigned.
-        var vehicleA = new TestdataPostChainReaderVehicle("A");
-        var vehicleB = new TestdataPostChainReaderVehicle("B");
+        var v1 = new TestdataMultiEntityChainSlackVisit("v1", 2);
+        var v2 = new TestdataMultiEntityChainSlackVisit("v2", 3);
+        var v3 = new TestdataMultiEntityChainSlackVisit("v3", 4); // Initially unassigned.
+        var vehicleA = new TestdataMultiEntityChainSlackVehicle("A");
+        var vehicleB = new TestdataMultiEntityChainSlackVehicle("B");
         vehicleA.setVisits(new ArrayList<>(List.of(v1, v2)));
-        var solution = new TestdataPostChainReaderSolution();
+        var solution = new TestdataMultiEntityChainSlackSolution();
         solution.setVehicles(List.of(vehicleA, vehicleB));
         solution.setVisits(List.of(v1, v2, v3));
 
-        var solutionDescriptor = TestdataPostChainReaderSolution.buildSolutionDescriptor();
+        var solutionDescriptor = TestdataMultiEntityChainSlackSolution.buildSolutionDescriptor();
         var entities = new Object[] { vehicleA, vehicleB, v1, v2, v3 };
         var graphStructureAndDirection = GraphStructure.determineGraphStructure(solutionDescriptor, entities);
         var scoreDirector = Mockito.mock(InnerScoreDirector.class);
@@ -248,9 +248,9 @@ class ListElementBlockShadowVariableTest {
                         ChangedVariableNotifier.of(scoreDirector), entities));
         assertThat(graph).isNotInstanceOf(ListElementBlockVariableReferenceGraph.class);
 
-        var solutionMetaModel = TestdataPostChainReaderSolution.buildMetaModel();
-        var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataPostChainReaderVehicle.class)
-                .listVariable("visits", TestdataPostChainReaderVisit.class);
+        var solutionMetaModel = TestdataMultiEntityChainSlackSolution.buildMetaModel();
+        var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataMultiEntityChainSlackVehicle.class)
+                .listVariable("visits", TestdataMultiEntityChainSlackVisit.class);
         var context = MoveTester.build(solutionMetaModel).using(solution);
         assertThat(vehicleA.getEndTime()).isEqualTo(5);
         assertThat(v1.getSlack()).isEqualTo(3);
@@ -264,9 +264,9 @@ class ListElementBlockShadowVariableTest {
         assertThat(vehicleB.getEndTime()).isEqualTo(2);
         assertThat(v1.getSlack()).isZero();
         DeclarativeShadowVariableAssertions.assertShadowsAreAtFixedPoint(solution,
-                s -> s.getVehicles().stream().map(TestdataPostChainReaderVehicle::getEndTime).toList(),
-                s -> s.getVisits().stream().map(TestdataPostChainReaderVisit::getEndServiceTime).toList(),
-                s -> s.getVisits().stream().map(TestdataPostChainReaderVisit::getSlack).toList());
+                s -> s.getVehicles().stream().map(TestdataMultiEntityChainSlackVehicle::getEndTime).toList(),
+                s -> s.getVisits().stream().map(TestdataMultiEntityChainSlackVisit::getEndServiceTime).toList(),
+                s -> s.getVisits().stream().map(TestdataMultiEntityChainSlackVisit::getSlack).toList());
     }
 
     /**

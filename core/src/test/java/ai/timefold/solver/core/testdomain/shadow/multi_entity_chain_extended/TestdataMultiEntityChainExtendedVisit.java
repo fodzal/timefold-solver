@@ -1,4 +1,4 @@
-package ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback;
+package ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_extended;
 
 import ai.timefold.solver.core.api.domain.entity.PlanningEntity;
 import ai.timefold.solver.core.api.domain.variable.InverseRelationShadowVariable;
@@ -11,23 +11,23 @@ import ai.timefold.solver.core.testdomain.TestdataObject;
  * The class declaring the previous element, and therefore the element class of its vehicle's list.
  */
 @PlanningEntity
-public class TestdataExtendedVisit extends TestdataObject {
+public class TestdataMultiEntityChainExtendedVisit extends TestdataObject {
 
     @InverseRelationShadowVariable(sourceVariableName = "visits")
-    TestdataExtendedVehicle vehicle;
+    TestdataMultiEntityChainExtendedVehicle vehicle;
 
     @PreviousElementShadowVariable(sourceVariableName = "visits")
-    TestdataExtendedVisit previousVisit;
+    TestdataMultiEntityChainExtendedVisit previousVisit;
 
     int duration = 1;
 
     @ShadowVariable(supplierName = "endServiceTimeSupplier")
     Integer endServiceTime;
 
-    public TestdataExtendedVisit() {
+    public TestdataMultiEntityChainExtendedVisit() {
     }
 
-    public TestdataExtendedVisit(String code, int duration) {
+    public TestdataMultiEntityChainExtendedVisit(String code, int duration) {
         super(code);
         this.duration = duration;
     }
@@ -44,19 +44,19 @@ public class TestdataExtendedVisit extends TestdataObject {
         return previousEndServiceTime == null ? null : previousEndServiceTime + duration;
     }
 
-    public TestdataExtendedVehicle getVehicle() {
+    public TestdataMultiEntityChainExtendedVehicle getVehicle() {
         return vehicle;
     }
 
-    public void setVehicle(TestdataExtendedVehicle vehicle) {
+    public void setVehicle(TestdataMultiEntityChainExtendedVehicle vehicle) {
         this.vehicle = vehicle;
     }
 
-    public TestdataExtendedVisit getPreviousVisit() {
+    public TestdataMultiEntityChainExtendedVisit getPreviousVisit() {
         return previousVisit;
     }
 
-    public void setPreviousVisit(TestdataExtendedVisit previousVisit) {
+    public void setPreviousVisit(TestdataMultiEntityChainExtendedVisit previousVisit) {
         this.previousVisit = previousVisit;
     }
 

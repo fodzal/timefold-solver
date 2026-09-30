@@ -13,13 +13,13 @@ import ai.timefold.solver.core.testdomain.TestdataObject;
  * takes its whole route down with it.
  */
 @PlanningEntity
-public class TestdataChainLoopVisit extends TestdataObject {
+public class TestdataMultiEntityChainLoopVisit extends TestdataObject {
 
     @InverseRelationShadowVariable(sourceVariableName = "visits")
-    TestdataChainLoopVehicle vehicle;
+    TestdataMultiEntityChainLoopVehicle vehicle;
 
     @PreviousElementShadowVariable(sourceVariableName = "visits")
-    TestdataChainLoopVisit previousVisit;
+    TestdataMultiEntityChainLoopVisit previousVisit;
 
     int duration = 1;
 
@@ -29,10 +29,10 @@ public class TestdataChainLoopVisit extends TestdataObject {
     @ShadowVariablesInconsistent
     Boolean inconsistent;
 
-    public TestdataChainLoopVisit() {
+    public TestdataMultiEntityChainLoopVisit() {
     }
 
-    public TestdataChainLoopVisit(String code, int duration) {
+    public TestdataMultiEntityChainLoopVisit(String code, int duration) {
         super(code);
         this.duration = duration;
     }
@@ -50,19 +50,19 @@ public class TestdataChainLoopVisit extends TestdataObject {
         return base + duration;
     }
 
-    public TestdataChainLoopVehicle getVehicle() {
+    public TestdataMultiEntityChainLoopVehicle getVehicle() {
         return vehicle;
     }
 
-    public void setVehicle(TestdataChainLoopVehicle vehicle) {
+    public void setVehicle(TestdataMultiEntityChainLoopVehicle vehicle) {
         this.vehicle = vehicle;
     }
 
-    public TestdataChainLoopVisit getPreviousVisit() {
+    public TestdataMultiEntityChainLoopVisit getPreviousVisit() {
         return previousVisit;
     }
 
-    public void setPreviousVisit(TestdataChainLoopVisit previousVisit) {
+    public void setPreviousVisit(TestdataMultiEntityChainLoopVisit previousVisit) {
         this.previousVisit = previousVisit;
     }
 

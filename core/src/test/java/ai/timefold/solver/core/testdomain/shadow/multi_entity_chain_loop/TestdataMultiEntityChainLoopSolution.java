@@ -1,4 +1,4 @@
-package ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_post_chain_reader;
+package ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_loop;
 
 import java.util.List;
 
@@ -11,40 +11,42 @@ import ai.timefold.solver.core.impl.domain.solution.descriptor.SolutionDescripto
 import ai.timefold.solver.core.preview.api.domain.metamodel.PlanningSolutionMetaModel;
 
 @PlanningSolution
-public class TestdataPostChainReaderSolution {
+public class TestdataMultiEntityChainLoopSolution {
 
-    public static SolutionDescriptor<TestdataPostChainReaderSolution> buildSolutionDescriptor() {
-        return SolutionDescriptor.buildSolutionDescriptor(TestdataPostChainReaderSolution.class,
-                TestdataPostChainReaderVehicle.class, TestdataPostChainReaderVisit.class);
+    public static SolutionDescriptor<TestdataMultiEntityChainLoopSolution> buildSolutionDescriptor() {
+        return SolutionDescriptor.buildSolutionDescriptor(TestdataMultiEntityChainLoopSolution.class,
+                TestdataMultiEntityChainLoopVehicle.class, TestdataMultiEntityChainLoopVisit.class);
     }
 
-    public static PlanningSolutionMetaModel<TestdataPostChainReaderSolution> buildMetaModel() {
+    public static PlanningSolutionMetaModel<TestdataMultiEntityChainLoopSolution> buildMetaModel() {
         return buildSolutionDescriptor().getMetaModel();
     }
 
+    // The vehicles are their own value range, so previousVehicle can chain any two of them.
     @PlanningEntityCollectionProperty
-    List<TestdataPostChainReaderVehicle> vehicles;
+    @ValueRangeProvider
+    List<TestdataMultiEntityChainLoopVehicle> vehicles;
 
     @PlanningEntityCollectionProperty
     @ValueRangeProvider
-    List<TestdataPostChainReaderVisit> visits;
+    List<TestdataMultiEntityChainLoopVisit> visits;
 
     @PlanningScore
     SimpleScore score;
 
-    public List<TestdataPostChainReaderVehicle> getVehicles() {
+    public List<TestdataMultiEntityChainLoopVehicle> getVehicles() {
         return vehicles;
     }
 
-    public void setVehicles(List<TestdataPostChainReaderVehicle> vehicles) {
+    public void setVehicles(List<TestdataMultiEntityChainLoopVehicle> vehicles) {
         this.vehicles = vehicles;
     }
 
-    public List<TestdataPostChainReaderVisit> getVisits() {
+    public List<TestdataMultiEntityChainLoopVisit> getVisits() {
         return visits;
     }
 
-    public void setVisits(List<TestdataPostChainReaderVisit> visits) {
+    public void setVisits(List<TestdataMultiEntityChainLoopVisit> visits) {
         this.visits = visits;
     }
 

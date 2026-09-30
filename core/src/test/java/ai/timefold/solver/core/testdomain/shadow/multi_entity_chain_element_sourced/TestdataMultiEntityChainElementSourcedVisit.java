@@ -12,23 +12,23 @@ import ai.timefold.solver.core.testdomain.TestdataObject;
  * takes its whole route down with it.
  */
 @PlanningEntity
-public class TestdataElementSourcedVisit extends TestdataObject {
+public class TestdataMultiEntityChainElementSourcedVisit extends TestdataObject {
 
     @InverseRelationShadowVariable(sourceVariableName = "visits")
-    TestdataElementSourcedVehicle vehicle;
+    TestdataMultiEntityChainElementSourcedVehicle vehicle;
 
     @PreviousElementShadowVariable(sourceVariableName = "visits")
-    TestdataElementSourcedVisit previousVisit;
+    TestdataMultiEntityChainElementSourcedVisit previousVisit;
 
     int duration = 1;
 
     @ShadowVariable(supplierName = "endServiceTimeSupplier")
     Integer endServiceTime;
 
-    public TestdataElementSourcedVisit() {
+    public TestdataMultiEntityChainElementSourcedVisit() {
     }
 
-    public TestdataElementSourcedVisit(String code, int duration) {
+    public TestdataMultiEntityChainElementSourcedVisit(String code, int duration) {
         super(code);
         this.duration = duration;
     }
@@ -46,19 +46,19 @@ public class TestdataElementSourcedVisit extends TestdataObject {
         return base + duration;
     }
 
-    public TestdataElementSourcedVehicle getVehicle() {
+    public TestdataMultiEntityChainElementSourcedVehicle getVehicle() {
         return vehicle;
     }
 
-    public void setVehicle(TestdataElementSourcedVehicle vehicle) {
+    public void setVehicle(TestdataMultiEntityChainElementSourcedVehicle vehicle) {
         this.vehicle = vehicle;
     }
 
-    public TestdataElementSourcedVisit getPreviousVisit() {
+    public TestdataMultiEntityChainElementSourcedVisit getPreviousVisit() {
         return previousVisit;
     }
 
-    public void setPreviousVisit(TestdataElementSourcedVisit previousVisit) {
+    public void setPreviousVisit(TestdataMultiEntityChainElementSourcedVisit previousVisit) {
         this.previousVisit = previousVisit;
     }
 

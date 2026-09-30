@@ -1,4 +1,4 @@
-package ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback;
+package ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_watched;
 
 import ai.timefold.solver.core.api.domain.entity.PlanningEntity;
 import ai.timefold.solver.core.api.domain.variable.InverseRelationShadowVariable;
@@ -8,23 +8,23 @@ import ai.timefold.solver.core.api.domain.variable.ShadowVariable;
 import ai.timefold.solver.core.testdomain.TestdataObject;
 
 @PlanningEntity
-public class TestdataWatchedVisitsVisit extends TestdataObject {
+public class TestdataMultiEntityChainWatchedVisit extends TestdataObject {
 
     @InverseRelationShadowVariable(sourceVariableName = "visits")
-    TestdataWatchedVisitsVehicle vehicle;
+    TestdataMultiEntityChainWatchedVehicle vehicle;
 
     @PreviousElementShadowVariable(sourceVariableName = "visits")
-    TestdataWatchedVisitsVisit previousVisit;
+    TestdataMultiEntityChainWatchedVisit previousVisit;
 
     int duration = 1;
 
     @ShadowVariable(supplierName = "endServiceTimeSupplier")
     Integer endServiceTime;
 
-    public TestdataWatchedVisitsVisit() {
+    public TestdataMultiEntityChainWatchedVisit() {
     }
 
-    public TestdataWatchedVisitsVisit(String code, int duration) {
+    public TestdataMultiEntityChainWatchedVisit(String code, int duration) {
         super(code);
         this.duration = duration;
     }
@@ -49,19 +49,19 @@ public class TestdataWatchedVisitsVisit extends TestdataObject {
         this.duration = duration;
     }
 
-    public TestdataWatchedVisitsVehicle getVehicle() {
+    public TestdataMultiEntityChainWatchedVehicle getVehicle() {
         return vehicle;
     }
 
-    public void setVehicle(TestdataWatchedVisitsVehicle vehicle) {
+    public void setVehicle(TestdataMultiEntityChainWatchedVehicle vehicle) {
         this.vehicle = vehicle;
     }
 
-    public TestdataWatchedVisitsVisit getPreviousVisit() {
+    public TestdataMultiEntityChainWatchedVisit getPreviousVisit() {
         return previousVisit;
     }
 
-    public void setPreviousVisit(TestdataWatchedVisitsVisit previousVisit) {
+    public void setPreviousVisit(TestdataMultiEntityChainWatchedVisit previousVisit) {
         this.previousVisit = previousVisit;
     }
 
