@@ -259,6 +259,7 @@ class GraphStructureTest {
         // orders it after the route it summarizes.
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataElementSourcedSolution.buildSolutionDescriptor(), vehicle, visit))
+                .hasFieldOrPropertyWithValue("structure", LIST_ELEMENT_BLOCK)
                 .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
                 .hasFieldOrPropertyWithValue("blockedElementClass", TestdataElementSourcedVisit.class);
     }
