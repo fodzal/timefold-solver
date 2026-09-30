@@ -26,8 +26,8 @@ import org.jspecify.annotations.Nullable;
  * through the graph's edges.
  * The whole chain is walked when a pre-chain variable changed, since any element may read it,
  * and when no element recorded where the chain changed.
- * Where the chain changed is recorded in its entity's {@link ChainState}, allocated once,
- * by {@link ListElementBlockVariableReferenceGraph}, which tracks the changes.
+ * Each list entity's {@link ChainState} is allocated once, here;
+ * {@link ListElementBlockVariableReferenceGraph}, which tracks the changes, records in it where the chain changed.
  * <p>
  * When the block node is part of a dependency loop, the elements follow their entity:
  * they are marked inconsistent and their variables are set to null.
@@ -47,7 +47,8 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
     private final DeclarativeShadowVariableDescriptor<Solution_>[] preChainVariableDescriptors;
     private final boolean canTerminateEarly;
 
-    // The chain states are mutable, written by ListElementBlockVariableReferenceGraph.
+    // The chain states are mutable, written by ListElementBlockVariableReferenceGraph as it records the changes
+    // and by this updater as it walks the chains.
     private final IdentityHashMap<Object, ChainState> listEntityToChainStateMap;
 
     @SuppressWarnings("unchecked")
@@ -261,7 +262,7 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
         // The list indexes of the elements whose source variables changed, in no particular order.
         private int[] changedElementIndexes = new int[4];
         private int changedElementCount;
-        // Dirtied by the update in progress.
+        // Changed since the last update, so in the graph's dirtyChainStateList.
         private boolean isDirty;
         // A dependency loop marked the chain inconsistent, or an update gave up before walking it,
         // until an update walks the whole chain; not reset between updates.

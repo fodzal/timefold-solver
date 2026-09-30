@@ -275,8 +275,6 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         var preChainVariableDescriptorList = innerDescriptorList.stream()
                 .filter(descriptor -> preChainVariableIdSet.contains(descriptor.getVariableMetaModel()))
                 .toList();
-        var listVariableState = Objects.requireNonNull(changedVariableNotifier.innerScoreDirector())
-                .<Object, Object> getListVariableState(listVariableDescriptor);
         var blockUpdater = new ListElementBlockUpdater<>(listVariableDescriptor,
                 graphStructureAndDirection.direction() == ParentVariableType.PREVIOUS, listEntityConsistencyState,
                 elementConsistencyState, sortedElementDescriptors, preChainVariableDescriptorList,
@@ -302,6 +300,8 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         @SuppressWarnings("unchecked")
         var innerGraph = (AbstractVariableReferenceGraph<Solution_, ?>) builder.build(innerGraphDescriptor.graphCreator(),
                 innerGraphDescriptor.ignoreInconsistentSolutions());
+        var listVariableState = Objects.requireNonNull(changedVariableNotifier.innerScoreDirector())
+                .<Object, Object> getListVariableState(listVariableDescriptor);
         return new ListElementBlockVariableReferenceGraph<>(innerGraph, blockUpdater, listVariableState,
                 listVariableMetaModel, elementEntityClass, elementConsistencyState, elementDescriptorList,
                 changedVariableNotifier, graphDescriptor.entities());
