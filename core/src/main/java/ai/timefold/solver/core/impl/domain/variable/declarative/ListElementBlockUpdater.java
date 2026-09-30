@@ -2,6 +2,7 @@ package ai.timefold.solver.core.impl.domain.variable.declarative;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
@@ -54,6 +55,9 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
     // These are mutable, written by ListElementBlockVariableReferenceGraph.
     private final List<Object> changedElementList;
     // The unassigned elements the classification in progress recomputed, so that each is recomputed once.
+    // The set finds them; the list empties the set one element at a time, since clearing it would cost
+    // its capacity, which the initial update sizes for every unassigned element of the solution.
+    private final Set<Object> recomputedUnassignedElementSet;
     private final List<Object> recomputedUnassignedElementList;
     private final IdentityHashMap<Object, ChainState> listEntityToChainStateMap;
     private final List<ChainState> dirtyChainStateList;
@@ -77,6 +81,7 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
         this.elementConsistencyState = elementConsistencyState;
         this.canTerminateEarly = canTerminateEarly;
         this.changedElementList = new ArrayList<>();
+        this.recomputedUnassignedElementSet = Collections.newSetFromMap(new IdentityHashMap<>());
         this.recomputedUnassignedElementList = new ArrayList<>();
         this.listEntityToChainStateMap = new IdentityHashMap<>();
         this.dirtyChainStateList = new ArrayList<>();
@@ -288,7 +293,7 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
             var listEntity = listVariableState.getInverseSingleton(element);
             if (listEntity == null) {
                 // A move changing an element before unassigning it records it twice, apart.
-                if (!containsSame(recomputedUnassignedElementList, element)) {
+                if (recomputedUnassignedElementSet.add(element)) {
                     recomputedUnassignedElementList.add(element);
                     markConsistent(element, changedVariableNotifier);
                     updateElement(element, changedVariableNotifier);
@@ -300,21 +305,19 @@ final class ListElementBlockUpdater<Solution_> implements VariableUpdater<Soluti
             markDirty(chainState);
         }
         changedElementList.clear();
-        recomputedUnassignedElementList.clear();
+        forgetRecomputedUnassignedElements();
         for (var chainState : dirtyChainStateList) {
             dirtyListEntityConsumer.accept(chainState.listEntity);
         }
     }
 
     @SuppressWarnings("ForLoopReplaceableByForEach")
-    private static boolean containsSame(List<Object> elementList, Object element) {
+    private void forgetRecomputedUnassignedElements() {
         // Avoid creation of iterators on the hot path.
-        for (var i = 0; i < elementList.size(); i++) {
-            if (elementList.get(i) == element) {
-                return true;
-            }
+        for (var i = 0; i < recomputedUnassignedElementList.size(); i++) {
+            recomputedUnassignedElementSet.remove(recomputedUnassignedElementList.get(i));
         }
-        return false;
+        recomputedUnassignedElementList.clear();
     }
 
     /**
