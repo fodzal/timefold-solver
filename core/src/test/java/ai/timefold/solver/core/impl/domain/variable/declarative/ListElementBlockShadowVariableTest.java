@@ -216,28 +216,20 @@ class ListElementBlockShadowVariableTest {
      */
     @Test
     void cyclicVehicleFactsWithoutFixedLoopFallBack() {
-        var vehicleA = new TestdataFactCycleVehicle(
-                "A", 0);
-        var vehicleB = new TestdataFactCycleVehicle(
-                "B", 0);
+        var vehicleA = new TestdataFactCycleVehicle("A", 0);
+        var vehicleB = new TestdataFactCycleVehicle("B", 0);
         vehicleA.setPreviousVehicle(vehicleB);
         vehicleB.setPreviousVehicle(vehicleA);
         var v1 = new TestdataFactCycleVisit("v1", 1);
         var v2 = new TestdataFactCycleVisit("v2", 1);
 
-        var solution =
-                new TestdataFactCycleSolution();
+        var solution = new TestdataFactCycleSolution();
         solution.setVehicles(List.of(vehicleA, vehicleB));
         solution.setVisits(List.of(v1, v2));
 
-        var solutionMetaModel =
-                TestdataFactCycleSolution
-                        .buildMetaModel();
-        var listVariableMetaModel = solutionMetaModel
-                .genuineEntity(
-                        TestdataFactCycleVehicle.class)
-                .listVariable("visits",
-                        TestdataFactCycleVisit.class);
+        var solutionMetaModel = TestdataFactCycleSolution.buildMetaModel();
+        var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataFactCycleVehicle.class)
+                .listVariable("visits", TestdataFactCycleVisit.class);
 
         // With empty routes there is no dependency loop; both vehicles are consistent.
         var context = MoveTester.build(solutionMetaModel).using(solution);
