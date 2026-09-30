@@ -323,14 +323,16 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             Set<VariableMetaModel<?, ?, ?>> preChainVariableIdSet,
             List<VariableMetaModel<?, ?, ?>> postChainVariableIdList) {
         var blockEdgeList = new ArrayList<BlockEdge<Solution_>>();
+        // Every block node shares the updater, keyed by the list variable itself,
+        // so that a lookup by variable and entity finds it.
+        var blockUpdaterList = List.of(blockUpdater);
         for (var listEntity : entities) {
             if (!listEntityClass.isInstance(listEntity)) {
                 continue;
             }
-            // Keyed by the list variable itself, so that a lookup by variable and entity finds it.
             // ListElementBlockVariableReferenceGraph's constructor records every element,
             // which marks the block node of every non-empty list for the initial walk.
-            builder.addVariableReferenceEntity(listEntity, List.of(blockUpdater));
+            builder.addVariableReferenceEntity(listEntity, blockUpdaterList);
             blockUpdater.addListEntity(listEntity);
             var blockNode = builder.lookupOrError(listVariableMetaModel, listEntity);
             for (var preChainVariableId : preChainVariableIdSet) {
