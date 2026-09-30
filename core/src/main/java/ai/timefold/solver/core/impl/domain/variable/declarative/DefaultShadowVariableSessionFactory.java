@@ -226,6 +226,10 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         // its looped status through the list entity's consistency state.
         var listEntityDescriptor = listVariableDescriptor.getEntityDescriptor();
         var listEntityClass = listEntityDescriptor.getEntityClass();
+        if (Arrays.stream(graphDescriptor.entities()).noneMatch(listEntityClass::isInstance)) {
+            // No block node to process: every element is unassigned.
+            return buildArbitraryGraph(graphDescriptor);
+        }
         var elementDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
         var innerDescriptorList = new ArrayList<DeclarativeShadowVariableDescriptor<Solution_>>();
         // The post-chain variables, with direct list element sources, get an edge from the block
@@ -294,7 +298,9 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
             LOGGER.trace("The block node edges would form a dependency loop; falling back to the arbitrary graph.");
             return buildArbitraryGraph(graphDescriptor);
         }
-        var innerGraph = builder.build(innerGraphDescriptor.graphCreator(),
+        // Never empty: every list entity has a block node.
+        @SuppressWarnings("unchecked")
+        var innerGraph = (AbstractVariableReferenceGraph<Solution_, ?>) builder.build(innerGraphDescriptor.graphCreator(),
                 innerGraphDescriptor.ignoreInconsistentSolutions());
         return new ListElementBlockVariableReferenceGraph<>(innerGraph, blockUpdater, listVariableMetaModel,
                 elementEntityClass, elementConsistencyState, elementDescriptorList, changedVariableNotifier,

@@ -195,6 +195,19 @@ class ListElementBlockShadowVariableTest {
         assertShadowsAreAtFixedPoint(solution);
     }
 
+    @Test
+    void solutionWithoutVehiclesFallsBack() {
+        var visit = new TestdataMultiEntityChainVisit("v1");
+
+        var solution = new TestdataMultiEntityChainSolution();
+        solution.setVehicles(List.of());
+        solution.setVisits(List.of(visit));
+
+        // Without a list entity there is no block node, so the arbitrary graph covers the unassigned visit.
+        MoveTester.build(TestdataMultiEntityChainSolution.buildMetaModel()).using(solution);
+        assertThat(visit.getEndServiceTime()).isNull();
+    }
+
     /**
      * The block node edges overapproximate the per-element dependencies:
      * when the vehicles' fact dependencies form a cycle that is not a fixed loop

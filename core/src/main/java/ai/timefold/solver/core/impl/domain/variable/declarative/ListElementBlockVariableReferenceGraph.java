@@ -14,7 +14,6 @@ import ai.timefold.solver.core.api.score.analysis.VariableLoop;
 import ai.timefold.solver.core.preview.api.domain.metamodel.VariableMetaModel;
 
 import org.jspecify.annotations.NullMarked;
-import org.jspecify.annotations.Nullable;
 
 /**
  * A variable reference graph that excludes a planning list variable's elements from the graph
@@ -42,8 +41,7 @@ import org.jspecify.annotations.Nullable;
 final class ListElementBlockVariableReferenceGraph<Solution_> implements VariableReferenceGraph {
 
     // These are immutable.
-    private final VariableReferenceGraph innerGraph;
-    private final @Nullable AbstractVariableReferenceGraph<Solution_, ?> innerNodeGraph;
+    private final AbstractVariableReferenceGraph<Solution_, ?> innerGraph;
     private final ListElementBlockUpdater<Solution_> blockUpdater;
     private final String listVariableName;
     private final Class<?> elementEntityClass;
@@ -63,7 +61,7 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
     private boolean isUpdating;
 
     ListElementBlockVariableReferenceGraph(
-            VariableReferenceGraph innerGraph,
+            AbstractVariableReferenceGraph<Solution_, ?> innerGraph,
             ListElementBlockUpdater<Solution_> blockUpdater,
             VariableMetaModel<Solution_, ?, ?> listVariableMetaModel,
             Class<?> elementEntityClass,
@@ -72,20 +70,15 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
             ChangedVariableNotifier<Solution_> changedVariableNotifier,
             Object[] entities) {
         this.innerGraph = innerGraph;
-        // A graph without nodes, hence without block nodes, only comes out of a solution that has no
-        // list entity at all. Every element is then unassigned, and classifyChangedElements computes
-        // those directly, so there is nothing left for a block node to do.
-        this.innerNodeGraph = innerGraph instanceof AbstractVariableReferenceGraph<?, ?> abstractGraph
-                ? (AbstractVariableReferenceGraph<Solution_, ?>) abstractGraph
-                : null;
         this.blockUpdater = blockUpdater;
         this.listVariableName = listVariableMetaModel.name();
         this.elementEntityClass = elementEntityClass;
         this.changedVariableNotifier = changedVariableNotifier;
-        this.listEntityToBlockNodeMap = innerNodeGraph == null ? Map.of()
-                : innerNodeGraph.variableReferenceToContainingNodeMap.getOrDefault(listVariableMetaModel, Map.of());
-        this.listVariableAfterProcessorList = innerNodeGraph == null ? List.of()
-                : innerNodeGraph.variableReferenceToAfterProcessor.getOrDefault(listVariableMetaModel, List.of());
+        // The graph is only built for a solution with at least one list entity, hence one block node.
+        this.listEntityToBlockNodeMap =
+                Objects.requireNonNull(innerGraph.variableReferenceToContainingNodeMap.get(listVariableMetaModel));
+        this.listVariableAfterProcessorList =
+                innerGraph.variableReferenceToAfterProcessor.getOrDefault(listVariableMetaModel, List.of());
         this.isUpdating = false;
 
         this.monitoredSourceVariableSet = new HashSet<>();
@@ -190,19 +183,11 @@ final class ListElementBlockVariableReferenceGraph<Solution_> implements Variabl
      * to walk and no edge to the entity, so nothing would recompute its post-chain variables.
      */
     private void markPostChainVariablesChanged(Object entity) {
-        var nodeGraph = innerNodeGraph;
-        if (nodeGraph == null) {
-            return;
-        }
-        nodeGraph.processEntity(listVariableAfterProcessorList, entity);
+        innerGraph.processEntity(listVariableAfterProcessorList, entity);
     }
 
     private void markBlockNodeChanged(Object listEntity) {
-        var nodeGraph = innerNodeGraph;
-        if (nodeGraph == null) {
-            return;
-        }
         // Every list entity of the solution the graph was built for has a block node.
-        nodeGraph.markChanged(Objects.requireNonNull(listEntityToBlockNodeMap.get(listEntity)));
+        innerGraph.markChanged(Objects.requireNonNull(listEntityToBlockNodeMap.get(listEntity)));
     }
 }

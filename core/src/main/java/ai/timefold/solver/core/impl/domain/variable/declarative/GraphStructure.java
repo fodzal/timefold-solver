@@ -57,7 +57,8 @@ public enum GraphStructure {
      * and before the variables sourced from its elements.
      * Processing a block node walks its list in the {@link GraphStructureAndDirection#direction()},
      * from each element whose sources changed.
-     * Built as {@link #ARBITRARY} without a score director, or when the block nodes would close a dependency loop.
+     * Built as {@link #ARBITRARY} without a score director or a list entity,
+     * or when the block nodes would close a dependency loop.
      */
     LIST_ELEMENT_BLOCK;
 
