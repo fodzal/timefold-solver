@@ -79,14 +79,8 @@ final class DeclarativeShadowVariableAssertions {
                 .updateChanged();
     }
 
-    static <Solution_> Solution_ solveWithFullAssert(Class<Solution_> solutionClass,
-            Class<? extends ConstraintProvider> constraintProviderClass, Solution_ problem, Class<?>... entityClasses) {
-        return SolverFactory.<Solution_> create(buildFullAssertSolverConfig(solutionClass, constraintProviderClass,
-                entityClasses)).buildSolver().solve(problem);
-    }
-
     /**
-     * As {@link #solveWithFullAssert(Class, Class, Object, Class[])}, with sub list moves that may reverse
+     * Solves under {@link EnvironmentMode#FULL_ASSERT}, with sub list moves that may reverse
      * and ruin and recreate moves on top of the default list moves,
      * so that single moves change a list in several places.
      */
