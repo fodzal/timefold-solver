@@ -71,7 +71,7 @@ class ListElementBlockVariableReferenceGraphTest {
 
         // The topological order puts vehicle A's block node before vehicle B's,
         // so every element is computed exactly once even at construction.
-        assertThat(List.of(a1, a2, b1, b2)).allMatch(visit -> visit.getCalledCount() == 1);
+        assertThat(List.of(a1, a2, b1, b2)).allSatisfy(visit -> assertThat(visit.getCalledCount()).isOne());
         assertThat(a3.getCalledCount()).isOne();
         assertThat(vehicleB.getEndTime()).isEqualTo(4);
 
