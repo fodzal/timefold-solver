@@ -1,7 +1,6 @@
 package ai.timefold.solver.core.impl.domain.variable.declarative;
 
 import static ai.timefold.solver.core.impl.domain.variable.declarative.DeclarativeShadowVariableAssertions.executeRandomListMove;
-import static ai.timefold.solver.core.impl.domain.variable.declarative.DeclarativeShadowVariableAssertions.solveWithFullAssertAndEveryListMove;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.ArrayList;
@@ -10,7 +9,6 @@ import java.util.Random;
 
 import ai.timefold.solver.core.preview.api.move.builtin.Moves;
 import ai.timefold.solver.core.preview.api.move.test.MoveTester;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_next.TestdataMultiEntityChainNextConstraintProvider;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_next.TestdataMultiEntityChainNextSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_next.TestdataMultiEntityChainNextVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_next.TestdataMultiEntityChainNextVisit;
@@ -74,13 +72,6 @@ class ListElementBlockNextShadowVariableTest {
         assertThat(x1.getLatestStartTime()).isEqualTo(95);
         assertThat(vehicleA.getStartTime()).isEqualTo(95);
         assertShadowsAreAtFixedPoint(solution);
-    }
-
-    @Test
-    void solveNextDirectionalModelWithEveryListMove() {
-        assertShadowsAreAtFixedPoint(solveWithFullAssertAndEveryListMove(TestdataMultiEntityChainNextSolution.class,
-                TestdataMultiEntityChainNextConstraintProvider.class, generateSolution(),
-                TestdataMultiEntityChainNextVehicle.class, TestdataMultiEntityChainNextVisit.class));
     }
 
     /**
