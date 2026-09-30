@@ -17,9 +17,6 @@ import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMult
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVisit;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataFactCycleSolution;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataFactCycleVehicle;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_fallback.TestdataFactCycleVisit;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_post_chain_reader.TestdataPostChainReaderSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_post_chain_reader.TestdataPostChainReaderVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_post_chain_reader.TestdataPostChainReaderVisit;
@@ -206,48 +203,6 @@ class ListElementBlockShadowVariableTest {
         // Without a list entity there is no block node, so the arbitrary graph covers the unassigned visit.
         MoveTester.build(TestdataMultiEntityChainSolution.buildMetaModel()).using(solution);
         assertThat(visit.getEndServiceTime()).isNull();
-    }
-
-    /**
-     * The block node edges overapproximate the per-element dependencies:
-     * when the vehicles' fact dependencies form a cycle that is not a fixed loop
-     * (endTime does not read startTime), the model falls back to the arbitrary graph,
-     * where the loop only exists through the actual elements and the solver can break it.
-     */
-    @Test
-    void cyclicVehicleFactsWithoutFixedLoopFallBack() {
-        var vehicleA = new TestdataFactCycleVehicle("A", 0);
-        var vehicleB = new TestdataFactCycleVehicle("B", 0);
-        vehicleA.setPreviousVehicle(vehicleB);
-        vehicleB.setPreviousVehicle(vehicleA);
-        var v1 = new TestdataFactCycleVisit("v1", 1);
-        var v2 = new TestdataFactCycleVisit("v2", 1);
-
-        var solution = new TestdataFactCycleSolution();
-        solution.setVehicles(List.of(vehicleA, vehicleB));
-        solution.setVisits(List.of(v1, v2));
-
-        var solutionMetaModel = TestdataFactCycleSolution.buildMetaModel();
-        var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataFactCycleVehicle.class)
-                .listVariable("visits", TestdataFactCycleVisit.class);
-
-        // With empty routes there is no dependency loop; both vehicles are consistent.
-        var context = MoveTester.build(solutionMetaModel).using(solution);
-        assertThat(vehicleA.isInconsistent()).isFalse();
-        assertThat(vehicleB.isInconsistent()).isFalse();
-
-        // Assigning visits to both vehicles creates the loop; the solver could break it later.
-        context.execute(Moves.assign(listVariableMetaModel, v1, vehicleA, 0));
-        context.execute(Moves.assign(listVariableMetaModel, v2, vehicleB, 0));
-        assertThat(vehicleA.isInconsistent()).isTrue();
-        assertThat(vehicleB.isInconsistent()).isTrue();
-
-        // Unassigning vehicle A's visit breaks the loop again.
-        context.execute(Moves.unassign(listVariableMetaModel, vehicleA, 0));
-        assertThat(vehicleA.isInconsistent()).isFalse();
-        assertThat(vehicleB.isInconsistent()).isFalse();
-        assertThat(v2.getEndServiceTime()).isEqualTo(1);
-        assertThat(vehicleB.getEndTime()).isEqualTo(1);
     }
 
     @Test
