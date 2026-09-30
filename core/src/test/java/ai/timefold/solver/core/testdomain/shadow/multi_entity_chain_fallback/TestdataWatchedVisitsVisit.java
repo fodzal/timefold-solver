@@ -34,11 +34,11 @@ public class TestdataWatchedVisitsVisit extends TestdataObject {
         if (vehicle == null) {
             return null;
         }
-        var base = previousVisit != null ? previousVisit.getEndServiceTime() : (Integer) vehicle.getDepartureTime();
-        if (base == null) {
-            return null;
+        if (previousVisit == null) {
+            return vehicle.getDepartureTime() + duration;
         }
-        return base + duration;
+        var previousEndServiceTime = previousVisit.getEndServiceTime();
+        return previousEndServiceTime == null ? null : previousEndServiceTime + duration;
     }
 
     public int getDuration() {
