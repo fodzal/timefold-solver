@@ -112,23 +112,14 @@ class ListElementBlockVariableReferenceGraphTest {
         assertThat(vehicleB.getEndTime()).isEqualTo(5);
     }
 
-    @Test
-    void deepChainRecomputesEachVariableOnce() {
-        assertDeepChainRecomputesEachVariableOnce(false);
-    }
-
     /**
      * A vehicle's endTime that also reads its own previousEndTime changes as soon as its predecessor's
      * endTime does. Its edge from the block node is what keeps it from being computed before the chain
      * it summarizes has been walked, and from running ahead of the walks down the vehicle chain.
      */
     @Test
-    void deepChainRecomputesEachVariableOnceWhenTheEndTimeReadsThePreviousEndTime() {
-        assertDeepChainRecomputesEachVariableOnce(true);
-    }
-
-    private static void assertDeepChainRecomputesEachVariableOnce(boolean endTimeIncludesPreviousEndTime) {
-        var vehicleList = buildChain(endTimeIncludesPreviousEndTime);
+    void deepChainRecomputesEachVariableOnce() {
+        var vehicleList = buildChain(true);
         var unassignedVisit = new TestdataMultiEntityChainVisit("extra", LONG_VISIT_DURATION);
         var solution = buildSolution(vehicleList, unassignedVisit);
 

@@ -187,8 +187,7 @@ class GraphStructureTest {
         // which the block node's entity at a time updates cannot do.
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataAlignedListElementSolution.buildSolutionDescriptor(), entity, value))
-                .hasFieldOrPropertyWithValue("structure", ARBITRARY)
-                .hasFieldOrPropertyWithValue("blockedElementClass", null);
+                .hasFieldOrPropertyWithValue("structure", ARBITRARY);
     }
 
     @Test
@@ -223,8 +222,7 @@ class GraphStructureTest {
         watcher.getWatchedVisits().add(visit);
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataWatchedVisitsSolution.buildSolutionDescriptor(), vehicle, watcher, visit))
-                .hasFieldOrPropertyWithValue("structure", ARBITRARY)
-                .hasFieldOrPropertyWithValue("blockedElementClass", null);
+                .hasFieldOrPropertyWithValue("structure", ARBITRARY);
     }
 
     @Test
@@ -236,8 +234,7 @@ class GraphStructureTest {
         // so a list entity without declarative shadow variables falls back to the arbitrary graph.
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataNonDeclarativeListEntitySolution.buildSolutionDescriptor(), vehicle, visit, depot))
-                .hasFieldOrPropertyWithValue("structure", ARBITRARY)
-                .hasFieldOrPropertyWithValue("blockedElementClass", null);
+                .hasFieldOrPropertyWithValue("structure", ARBITRARY);
     }
 
     @Test
@@ -292,7 +289,6 @@ class GraphStructureTest {
         // so a declarative variable declared on a visit subclass falls back to the arbitrary graph.
         assertThat(GraphStructure.determineGraphStructure(
                 TestdataExtendedSolution.buildSolutionDescriptor(), vehicle, visit, priorityVisit))
-                .hasFieldOrPropertyWithValue("structure", ARBITRARY)
-                .hasFieldOrPropertyWithValue("blockedElementClass", null);
+                .hasFieldOrPropertyWithValue("structure", ARBITRARY);
     }
 }

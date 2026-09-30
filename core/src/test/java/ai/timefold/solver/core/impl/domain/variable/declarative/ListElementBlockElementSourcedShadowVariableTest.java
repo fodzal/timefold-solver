@@ -33,7 +33,7 @@ import org.junit.jupiter.api.Test;
 class ListElementBlockElementSourcedShadowVariableTest {
 
     @Test
-    void changeOnPredecessorVehiclePropagatesThroughTheRoute() {
+    void vehicleLoopThroughTheRouteRejectsTheMove() {
         var a1 = new TestdataElementSourcedVisit("a1", 2);
         var a2 = new TestdataElementSourcedVisit("a2", 3);
         var b1 = new TestdataElementSourcedVisit("b1", 4);
@@ -63,28 +63,6 @@ class ListElementBlockElementSourcedShadowVariableTest {
         assertThat(a1.getEndServiceTime()).isEqualTo(16);
         assertThat(a2.getEndServiceTime()).isEqualTo(19);
         assertThat(vehicleA.getEndTime()).isEqualTo(19);
-    }
-
-    @Test
-    void vehicleLoopThroughTheRouteRejectsTheMove() {
-        var a1 = new TestdataElementSourcedVisit("a1", 2);
-        var a2 = new TestdataElementSourcedVisit("a2", 3);
-        var b1 = new TestdataElementSourcedVisit("b1", 4);
-        var vehicleA = new TestdataElementSourcedVehicle("A", 0);
-        var vehicleB = new TestdataElementSourcedVehicle("B", 10);
-        vehicleA.setVisits(new ArrayList<>(List.of(a1, a2)));
-        vehicleB.setVisits(new ArrayList<>(List.of(b1)));
-
-        var solution = new TestdataElementSourcedSolution();
-        solution.setVehicles(List.of(vehicleA, vehicleB));
-        solution.setVisits(List.of(a1, a2, b1));
-
-        var solutionMetaModel = TestdataElementSourcedSolution.buildMetaModel();
-        var previousVehicleMetaModel = solutionMetaModel.genuineEntity(TestdataElementSourcedVehicle.class)
-                .basicVariable("previousVehicle", TestdataElementSourcedVehicle.class);
-        var context = MoveTester.build(solutionMetaModel).using(solution);
-
-        context.execute(Moves.change(previousVehicleMetaModel, vehicleA, vehicleB));
 
         // Chaining B after A closes a loop that exists only through the two routes: B's startTime
         // feeds A's visits, which feed A's endTime, which feeds B's startTime.
