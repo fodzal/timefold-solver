@@ -51,23 +51,23 @@ public enum GraphStructure {
 
     /**
      * A graph structure where the elements of a planning list variable,
-     * of {@link GraphStructureAndDirection#blockedElementClass()}, are not graph nodes.
-     * Each list entity gets a single block node for its elements instead,
+     * of {@link GraphStructureAndDirection#chainElementClass()}, are not graph nodes.
+     * Each list entity gets a single chain node for its elements instead,
      * ordered after the variables its elements read through their inverse
      * and before the variables sourced from its elements.
-     * Processing a block node walks its list in the {@link GraphStructureAndDirection#direction()},
+     * Processing a chain node walks its list in the {@link GraphStructureAndDirection#direction()},
      * from each element whose sources changed.
      * Built as {@link #ARBITRARY} without a score director or a list entity,
-     * or when the block nodes would close a dependency loop.
+     * or when the chain nodes would close a dependency loop.
      */
-    LIST_ELEMENT_BLOCK;
+    LIST_CHAIN;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GraphStructure.class);
 
     public record GraphStructureAndDirection(GraphStructure structure,
             @Nullable VariableMetaModel<?, ?, ?> parentMetaModel,
             @Nullable ParentVariableType direction,
-            @Nullable Class<?> blockedElementClass) {
+            @Nullable Class<?> chainElementClass) {
 
         public GraphStructureAndDirection(GraphStructure structure,
                 @Nullable VariableMetaModel<?, ?, ?> parentMetaModel,
@@ -88,10 +88,10 @@ public enum GraphStructure {
             return new GraphStructureAndDirection(EMPTY, null, null);
         }
 
-        var blockAndDirection = determineListElementBlock(solutionDescriptor, declarativeShadowVariableDescriptors);
-        if (blockAndDirection != null) {
-            return new GraphStructureAndDirection(LIST_ELEMENT_BLOCK, null,
-                    blockAndDirection.direction(), blockAndDirection.elementEntityClass());
+        var chainAndDirection = determineListChain(solutionDescriptor, declarativeShadowVariableDescriptors);
+        if (chainAndDirection != null) {
+            return new GraphStructureAndDirection(LIST_CHAIN, null,
+                    chainAndDirection.direction(), chainAndDirection.elementEntityClass());
         }
 
         var multipleDeclarativeEntityClasses = declarativeShadowVariableDescriptors.stream()
@@ -162,15 +162,15 @@ public enum GraphStructure {
         }
     }
 
-    private record ListElementBlockAndDirection(Class<?> elementEntityClass, ParentVariableType direction) {
+    private record ListChainAndDirection(Class<?> elementEntityClass, ParentVariableType direction) {
     }
 
     /**
      * Non-null if every previous/next directional parent among the descriptors' sources agrees
-     * on a single source variable and direction, which fixes the block's element entity class
+     * on a single source variable and direction, which fixes the chain's element entity class
      * and walk direction.
      */
-    private static <Solution_> @Nullable ListElementBlockAndDirection findChainDirection(
+    private static <Solution_> @Nullable ListChainAndDirection findChainDirection(
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors) {
         VariableMetaModel<?, ?, ?> parentMetaModel = null;
         ParentVariableType direction = null;
@@ -188,7 +188,7 @@ public enum GraphStructure {
                         elementEntityClass = sourceParentMetaModel.entity().type();
                     } else if (!parentMetaModel.equals(sourceParentMetaModel)
                             || direction != parentVariableType) {
-                        // The block node walks each list in a single direction.
+                        // The chain node walks each list in a single direction.
                         return null;
                     }
                 }
@@ -197,17 +197,17 @@ public enum GraphStructure {
         if (elementEntityClass == null || direction == null) {
             return null;
         }
-        return new ListElementBlockAndDirection(elementEntityClass, direction);
+        return new ListChainAndDirection(elementEntityClass, direction);
     }
 
     /**
      * Non-null if the planning list variable's elements can be excluded from the variable
-     * reference graph and represented by a per-entity block node instead;
-     * see {@link GraphStructureAndDirection#blockedElementClass()}.
+     * reference graph and represented by a per-entity chain node instead;
+     * see {@link GraphStructureAndDirection#chainElementClass()}.
      * Only the element class's sources and the references towards the element class are
      * checked here: the rest of the model is covered by the graph, whatever its structure.
      */
-    private static <Solution_> @Nullable ListElementBlockAndDirection determineListElementBlock(
+    private static <Solution_> @Nullable ListChainAndDirection determineListChain(
             SolutionDescriptor<Solution_> solutionDescriptor,
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors) {
         var listVariableDescriptor = solutionDescriptor.getListVariableDescriptor();
@@ -224,13 +224,13 @@ public enum GraphStructure {
         if (!elementEntityClass.isAssignableFrom(listVariableDescriptor.getElementType())
                 || listEntityClass.isAssignableFrom(elementEntityClass)
                 || elementEntityClass.isAssignableFrom(listEntityClass)) {
-            // The block node walks the list entity's list and classifies entities with instanceof,
+            // The chain node walks the list entity's list and classifies entities with instanceof,
             // so the element class must cover the list's elements and be distinct from the list entity.
             return null;
         }
         for (var descriptor : declarativeShadowVariableDescriptors) {
             if (descriptor.getAlignmentKeyMap() != null) {
-                // The block node updates one entity at a time, both when it walks a chain
+                // The chain node updates one entity at a time, both when it walks a chain
                 // and when it recomputes the list entity's post-chain variables,
                 // which an alignment key's grouped updater contradicts.
                 return null;
@@ -239,7 +239,7 @@ public enum GraphStructure {
             if (entityClass != elementEntityClass
                     && (elementEntityClass.isAssignableFrom(entityClass)
                             || entityClass.isAssignableFrom(elementEntityClass))) {
-                // The block node's walk applies every element updater to every element,
+                // The chain node's walk applies every element updater to every element,
                 // so a declarative variable declared elsewhere in the element hierarchy
                 // would be applied to elements that do not have it.
                 return null;
@@ -247,7 +247,7 @@ public enum GraphStructure {
         }
         if (listEntityDescriptor.getShadowVariableDescriptors().stream()
                 .noneMatch(variableDescriptor -> variableDescriptor instanceof DeclarativeShadowVariableDescriptor<?>)) {
-            // The block node tracks its looped status through the list entity's consistency state,
+            // The chain node tracks its looped status through the list entity's consistency state,
             // which only exists when the list entity has declarative shadow variables of its own.
             // A model whose only declarative variables are its elements' is covered by the
             // existing structures anyway.
@@ -273,7 +273,7 @@ public enum GraphStructure {
                         case INVERSE -> {
                             // Only safe when it targets a declarative or a genuine variable of the list entity.
                             // A declarative one that depends on the elements, directly or not, would close a loop
-                            // through the block node, which the build detects; a genuine one depends on nothing.
+                            // through the chain node, which the build detects; a genuine one depends on nothing.
                             var listEntityReference = variableSource.variableSourceReferences().getLast();
                             if (!listEntityReference.isDeclarative()
                                     && !listEntityReference.variableMetaModel().isGenuine()) {

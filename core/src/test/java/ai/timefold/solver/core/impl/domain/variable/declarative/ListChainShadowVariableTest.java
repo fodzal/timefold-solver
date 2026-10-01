@@ -25,10 +25,10 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 /**
- * Tests {@link ListElementBlockVariableReferenceGraph} on a model where
+ * Tests {@link ListChainVariableReferenceGraph} on a model where
  * a vehicle starts where its predecessor vehicles end.
  */
-class ListElementBlockShadowVariableTest {
+class ListChainShadowVariableTest {
 
     @Test
     void changeOnPredecessorVehiclePropagates() {
@@ -200,7 +200,7 @@ class ListElementBlockShadowVariableTest {
         solution.setVehicles(List.of());
         solution.setVisits(List.of(visit));
 
-        // Without a list entity there is no block node, so the arbitrary graph covers the unassigned visit.
+        // Without a list entity there is no chain node, so the arbitrary graph covers the unassigned visit.
         MoveTester.build(TestdataMultiEntityChainSolution.buildMetaModel()).using(solution);
         assertThat(visit.getEndServiceTime()).isNull();
     }
@@ -223,7 +223,7 @@ class ListElementBlockShadowVariableTest {
 
     /**
      * A visit reads the end time of its own vehicle, which the visits source:
-     * the block node would have to be computed both before and after that end time,
+     * the chain node would have to be computed both before and after that end time,
      * so the build falls back to the arbitrary graph, whose per-visit nodes do not loop.
      */
     @Test
@@ -246,7 +246,7 @@ class ListElementBlockShadowVariableTest {
         var graph = DefaultShadowVariableSessionFactory.buildGraphForStructureAndDirection(graphStructureAndDirection,
                 new DefaultShadowVariableSessionFactory.GraphDescriptor<>(solutionDescriptor,
                         ChangedVariableNotifier.of(scoreDirector), entities));
-        assertThat(graph).isNotInstanceOf(ListElementBlockVariableReferenceGraph.class);
+        assertThat(graph).isNotInstanceOf(ListChainVariableReferenceGraph.class);
 
         var solutionMetaModel = TestdataMultiEntityChainSlackSolution.buildMetaModel();
         var listVariableMetaModel = solutionMetaModel.genuineEntity(TestdataMultiEntityChainSlackVehicle.class)

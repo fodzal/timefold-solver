@@ -21,12 +21,12 @@ import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_departure.Te
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests {@link ListElementBlockVariableReferenceGraph} on a model where the first visit of a route
+ * Tests {@link ListChainVariableReferenceGraph} on a model where the first visit of a route
  * reads its vehicle's departure time, a planning variable.
- * Unlike a declarative variable of the vehicle, it has no graph node to reach the block node through,
- * so its change marks the block node directly.
+ * Unlike a declarative variable of the vehicle, it has no graph node to reach the chain node through,
+ * so its change marks the chain node directly.
  */
-class ListElementBlockDepartureShadowVariableTest {
+class ListChainDepartureShadowVariableTest {
 
     @Test
     void departureTimeChangeShiftsTheWholeRoute() {
@@ -55,7 +55,7 @@ class ListElementBlockDepartureShadowVariableTest {
     }
 
     /**
-     * The list change records the visits it moves, from which the block node would walk the route;
+     * The list change records the visits it moves, from which the chain node would walk the route;
      * the departure time change in the same update is what makes it walk from the head of the route instead.
      */
     @Test

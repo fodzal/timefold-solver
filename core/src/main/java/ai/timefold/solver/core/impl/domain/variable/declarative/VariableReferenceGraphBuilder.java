@@ -32,7 +32,7 @@ public final class VariableReferenceGraphBuilder<Solution_> {
     final Map<VariableMetaModel<?, ?, ?>, List<ListElementSourceLocator>> listVariableReferenceToElementLocator;
     boolean isGraphFixed;
     /**
-     * True when a planning list variable has its elements represented by one block node per
+     * True when a planning list variable has its elements represented by one chain node per
      * list entity instead of a node each, so a list element source needs no per-element edges.
      */
     boolean excludesListElements;
