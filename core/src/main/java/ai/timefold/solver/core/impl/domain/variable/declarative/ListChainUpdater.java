@@ -187,8 +187,8 @@ final class ListChainUpdater<Solution_> implements VariableUpdater<Solution_> {
     private boolean markChainInconsistent(List<Object> elementList,
             ChangedVariableNotifier<Solution_> changedVariableNotifier) {
         var anyElementChanged = false;
-        for (var position = 0; position < elementList.size(); position++) {
-            var element = elementAt(elementList, position);
+        // Clearing an element reads none of the others, so the order does not matter.
+        for (var element : elementList) {
             if (elementConsistencyState.isEntityConsistent(element)) {
                 elementConsistencyState.setEntityIsInconsistent(changedVariableNotifier, element, true);
             }
