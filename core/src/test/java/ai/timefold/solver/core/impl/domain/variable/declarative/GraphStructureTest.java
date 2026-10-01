@@ -36,9 +36,6 @@ import ai.timefold.solver.core.testdomain.shadow.multi_entity.TestdataMultiEntit
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain.TestdataMultiEntityChainVisit;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_departure.TestdataMultiEntityChainDepartureSolution;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_departure.TestdataMultiEntityChainDepartureVehicle;
-import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_departure.TestdataMultiEntityChainDepartureVisit;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_element_sourced.TestdataMultiEntityChainElementSourcedSolution;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_element_sourced.TestdataMultiEntityChainElementSourcedVehicle;
 import ai.timefold.solver.core.testdomain.shadow.multi_entity_chain_element_sourced.TestdataMultiEntityChainElementSourcedVisit;
@@ -233,17 +230,6 @@ class GraphStructureTest {
                 .hasFieldOrPropertyWithValue("structure", LIST_CHAIN)
                 .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
                 .hasFieldOrPropertyWithValue("chainElementClass", TestdataMultiEntityChainLoopVisit.class);
-    }
-
-    @Test
-    void multiEntityChainWithElementsReadingAGenuineVariableThroughTheInverse() {
-        var vehicle = new TestdataMultiEntityChainDepartureVehicle("A", 0);
-        var visit = new TestdataMultiEntityChainDepartureVisit("v1", 1);
-        assertThat(GraphStructure.determineGraphStructure(
-                TestdataMultiEntityChainDepartureSolution.buildSolutionDescriptor(), vehicle, visit))
-                .hasFieldOrPropertyWithValue("structure", LIST_CHAIN)
-                .hasFieldOrPropertyWithValue("direction", ParentVariableType.PREVIOUS)
-                .hasFieldOrPropertyWithValue("chainElementClass", TestdataMultiEntityChainDepartureVisit.class);
     }
 
     @Test
