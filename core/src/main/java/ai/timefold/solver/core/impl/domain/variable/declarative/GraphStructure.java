@@ -88,10 +88,9 @@ public enum GraphStructure {
             return new GraphStructureAndDirection(EMPTY, null, null);
         }
 
-        var chainAndDirection = determineListChain(solutionDescriptor, declarativeShadowVariableDescriptors);
-        if (chainAndDirection != null) {
-            return new GraphStructureAndDirection(LIST_CHAIN, null,
-                    chainAndDirection.direction(), chainAndDirection.elementEntityClass());
+        var listChain = determineListChain(solutionDescriptor, declarativeShadowVariableDescriptors);
+        if (listChain != null) {
+            return listChain;
         }
 
         var multipleDeclarativeEntityClasses = declarativeShadowVariableDescriptors.stream()
@@ -162,19 +161,15 @@ public enum GraphStructure {
         }
     }
 
-    private record ListChainAndDirection(Class<?> elementEntityClass, ParentVariableType direction) {
-    }
-
     /**
      * Non-null if every previous/next directional parent among the descriptors' sources agrees
      * on a single source variable and direction, which fixes the chain's element entity class
      * and walk direction.
      */
-    private static <Solution_> @Nullable ListChainAndDirection findChainDirection(
+    private static <Solution_> @Nullable GraphStructureAndDirection findChainDirection(
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors) {
         VariableMetaModel<?, ?, ?> parentMetaModel = null;
         ParentVariableType direction = null;
-        Class<?> elementEntityClass = null;
         for (var descriptor : declarativeShadowVariableDescriptors) {
             for (var source : descriptor.getSources()) {
                 var parentVariableType = source.parentVariableType();
@@ -183,9 +178,6 @@ public enum GraphStructure {
                     if (parentMetaModel == null) {
                         parentMetaModel = sourceParentMetaModel;
                         direction = parentVariableType;
-                        // The class declaring the directional parent; the elements may be of any
-                        // subclass of it, as long as none of them declares a declarative variable.
-                        elementEntityClass = sourceParentMetaModel.entity().type();
                     } else if (!parentMetaModel.equals(sourceParentMetaModel)
                             || direction != parentVariableType) {
                         // The chain node walks each list in a single direction.
@@ -194,10 +186,12 @@ public enum GraphStructure {
                 }
             }
         }
-        if (elementEntityClass == null || direction == null) {
+        if (parentMetaModel == null) {
             return null;
         }
-        return new ListChainAndDirection(elementEntityClass, direction);
+        // The class declaring the directional parent; the elements may be of any
+        // subclass of it, as long as none of them declares a declarative variable.
+        return new GraphStructureAndDirection(LIST_CHAIN, null, direction, parentMetaModel.entity().type());
     }
 
     /**
@@ -207,18 +201,18 @@ public enum GraphStructure {
      * Only the element class's sources and the references towards the element class are
      * checked here: the rest of the model is covered by the graph, whatever its structure.
      */
-    private static <Solution_> @Nullable ListChainAndDirection determineListChain(
+    private static <Solution_> @Nullable GraphStructureAndDirection determineListChain(
             SolutionDescriptor<Solution_> solutionDescriptor,
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors) {
         var listVariableDescriptor = solutionDescriptor.getListVariableDescriptor();
         if (listVariableDescriptor == null) {
             return null;
         }
-        var chainDirection = findChainDirection(declarativeShadowVariableDescriptors);
-        if (chainDirection == null) {
+        var listChain = findChainDirection(declarativeShadowVariableDescriptors);
+        if (listChain == null) {
             return null;
         }
-        var elementEntityClass = chainDirection.elementEntityClass();
+        var elementEntityClass = listChain.chainElementClass();
         var listEntityDescriptor = listVariableDescriptor.getEntityDescriptor();
         var listEntityClass = listEntityDescriptor.getEntityClass();
         if (!elementEntityClass.isAssignableFrom(listVariableDescriptor.getElementType())
@@ -227,23 +221,6 @@ public enum GraphStructure {
             // The chain node walks the list entity's list and classifies entities with instanceof,
             // so the element class must cover the list's elements and be distinct from the list entity.
             return null;
-        }
-        for (var descriptor : declarativeShadowVariableDescriptors) {
-            if (descriptor.getAlignmentKeyMap() != null) {
-                // The chain node updates one entity at a time, both when it walks a chain
-                // and when it recomputes the list entity's post-chain variables,
-                // which an alignment key's grouped updater contradicts.
-                return null;
-            }
-            var entityClass = descriptor.getEntityDescriptor().getEntityClass();
-            if (entityClass != elementEntityClass
-                    && (elementEntityClass.isAssignableFrom(entityClass)
-                            || entityClass.isAssignableFrom(elementEntityClass))) {
-                // The chain node's walk applies every element updater to every element,
-                // so a declarative variable declared elsewhere in the element hierarchy
-                // would be applied to elements that do not have it.
-                return null;
-            }
         }
         if (listEntityDescriptor.getShadowVariableDescriptors().stream()
                 .noneMatch(variableDescriptor -> variableDescriptor instanceof DeclarativeShadowVariableDescriptor<?>)) {
@@ -254,7 +231,22 @@ public enum GraphStructure {
             return null;
         }
         for (var descriptor : declarativeShadowVariableDescriptors) {
-            var isElementSource = descriptor.getEntityDescriptor().getEntityClass() == elementEntityClass;
+            if (descriptor.getAlignmentKeyMap() != null) {
+                // The chain node updates one entity at a time, both when it walks a chain
+                // and when it recomputes the list entity's post-chain variables,
+                // which an alignment key's grouped updater contradicts.
+                return null;
+            }
+            var entityClass = descriptor.getEntityDescriptor().getEntityClass();
+            var isElementSource = entityClass == elementEntityClass;
+            if (!isElementSource
+                    && (elementEntityClass.isAssignableFrom(entityClass)
+                            || entityClass.isAssignableFrom(elementEntityClass))) {
+                // The chain node's walk applies every element updater to every element,
+                // so a declarative variable declared elsewhere in the element hierarchy
+                // would be applied to elements that do not have it.
+                return null;
+            }
             for (var variableSource : descriptor.getSources()) {
                 var parentVariableType = variableSource.parentVariableType();
                 if (isElementSource) {
@@ -303,7 +295,7 @@ public enum GraphStructure {
                 }
             }
         }
-        return chainDirection;
+        return listChain;
     }
 
     private static <Solution_> boolean doEntitiesUseDeclarativeShadowVariables(
