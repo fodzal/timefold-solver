@@ -168,7 +168,7 @@ public final class VariableReferenceGraphBuilder<Solution_> {
     }
 
     /**
-     * @return a graph of this builder's fixed edges alone, to test candidate edges against
+     * @return a graph of this builder's fixed edges alone, to test for a fixed loop
      */
     DefaultTopologicalOrderGraph newFixedEdgeGraph() {
         var graph = new DefaultTopologicalOrderGraph(nodeList.size());
