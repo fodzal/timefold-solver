@@ -661,6 +661,9 @@ public final class VariableSupport<Solution_> implements TrackerResolver<Solutio
      */
     public boolean forceUpdateAllShadowVariables(Solution_ workingSolution) {
         scoreDirector.getSolutionDescriptor().visitAllEntities(workingSolution, this::simulateGenuineVariableChange);
+        // A solution without any genuine entity sends no notification,
+        // yet the declarative shadow variables of its other entities still need updating.
+        dirty = true;
         return updateShadowVariables();
     }
 
