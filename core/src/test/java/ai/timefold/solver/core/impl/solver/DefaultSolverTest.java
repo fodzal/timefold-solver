@@ -148,6 +148,10 @@ import ai.timefold.solver.core.testdomain.shadow.no_inconsistent_field.TestdataD
 import ai.timefold.solver.core.testdomain.shadow.no_inconsistent_field.TestdataDependencyNoInconsistentFieldEntity;
 import ai.timefold.solver.core.testdomain.shadow.no_inconsistent_field.TestdataDependencyNoInconsistentFieldSolution;
 import ai.timefold.solver.core.testdomain.shadow.no_inconsistent_field.TestdataDependencyNoInconsistentFieldValue;
+import ai.timefold.solver.core.testdomain.shadow.no_inconsistent_field_owner_loop.TestdataOwnerLoopConstraintProvider;
+import ai.timefold.solver.core.testdomain.shadow.no_inconsistent_field_owner_loop.TestdataOwnerLoopSolution;
+import ai.timefold.solver.core.testdomain.shadow.no_inconsistent_field_owner_loop.TestdataOwnerLoopVehicle;
+import ai.timefold.solver.core.testdomain.shadow.no_inconsistent_field_owner_loop.TestdataOwnerLoopVisit;
 import ai.timefold.solver.core.testdomain.sort.comparator.OneValuePerEntityComparatorEasyScoreCalculator;
 import ai.timefold.solver.core.testdomain.sort.comparator.TestdataComparatorSortableEntity;
 import ai.timefold.solver.core.testdomain.sort.comparator.TestdataComparatorSortableSolution;
@@ -1761,6 +1765,45 @@ class DefaultSolverTest {
         assertThatCode(() -> PlannerTestUtils.solve(solverConfig, problem, false))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContainingAll("Entity", "b2", "while involved in a dependency loop");
+    }
+
+    @Test
+    void solveWhenIgnoringInconsistentSolutionsKeepsListOfOwnerInvolvedInLoop() {
+        var solverConfig = PlannerTestUtils.buildSolverConfig(
+                TestdataOwnerLoopSolution.class, TestdataOwnerLoopVehicle.class, TestdataOwnerLoopVisit.class)
+                .withEasyScoreCalculatorClass(null)
+                .withConstraintProviderClass(TestdataOwnerLoopConstraintProvider.class)
+                .withPhases(new CustomPhaseConfig()
+                        .withCustomPhaseCommands(command -> {
+                        }));
+
+        var vehicleA = new TestdataOwnerLoopVehicle("A", 0);
+        var vehicleB = new TestdataOwnerLoopVehicle("B", 0);
+        var visitA = new TestdataOwnerLoopVisit("a");
+        var visitB = new TestdataOwnerLoopVisit("b");
+
+        // Each vehicle starts where the other one ends, so the loop runs through both vehicles and their visits.
+        vehicleA.setPreviousVehicle(vehicleB);
+        vehicleB.setPreviousVehicle(vehicleA);
+        vehicleA.setVisits(new ArrayList<>(List.of(visitA)));
+        vehicleB.setVisits(new ArrayList<>(List.of(visitB)));
+
+        var problem = new TestdataOwnerLoopSolution();
+        problem.setVehicles(List.of(vehicleA, vehicleB));
+        problem.setVisits(List.of(visitA, visitB));
+
+        var solution = PlannerTestUtils.solve(solverConfig, problem);
+        assertThat(solution.getVehicles())
+                .allSatisfy(vehicle -> {
+                    assertThat(vehicle.getPreviousVehicle()).isNull();
+                    assertThat(vehicle.getVisits()).isEmpty();
+                    assertThat(vehicle.getEndTime()).isZero();
+                });
+        assertThat(solution.getVisits())
+                .allSatisfy(visit -> {
+                    assertThat(visit.getVehicle()).isNull();
+                    assertThat(visit.getEndServiceTime()).isNull();
+                });
     }
 
     @Test

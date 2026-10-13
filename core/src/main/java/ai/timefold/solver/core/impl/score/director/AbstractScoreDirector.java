@@ -418,10 +418,11 @@ public abstract class AbstractScoreDirector<Solution_, Score_ extends Score<Scor
                     Entity (%s) is pinned while involved in a dependency loop.
                     This creates an unresolvable inconsistency.""".formatted(inconsistentEntity));
         }
-        for (var genuineVariableDescriptor : entityDescriptor.getGenuineVariableDescriptorList()) {
-            beforeVariableChanged(genuineVariableDescriptor, inconsistentEntity);
-            genuineVariableDescriptor.setValue(inconsistentEntity, null);
-            afterVariableChanged(genuineVariableDescriptor, inconsistentEntity);
+        // The list variable is left alone; its elements involved in the loop were already unassigned.
+        for (var basicVariableDescriptor : entityDescriptor.getBasicVariableDescriptorList()) {
+            beforeVariableChanged(basicVariableDescriptor, inconsistentEntity);
+            basicVariableDescriptor.setValue(inconsistentEntity, null);
+            afterVariableChanged(basicVariableDescriptor, inconsistentEntity);
         }
         updateShadowVariables();
     }
