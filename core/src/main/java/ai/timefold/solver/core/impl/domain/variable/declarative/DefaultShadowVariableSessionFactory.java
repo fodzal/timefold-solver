@@ -270,7 +270,14 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
     private static <Solution_> VariableReferenceGraph buildArbitraryGraph(GraphDescriptor<Solution_> graphDescriptor) {
         var declarativeShadowVariableDescriptors =
                 graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors();
-        var variableIdToUpdater = EntityVariableUpdaterLookup.<Solution_> entityIndependentLookup();
+        var alignmentKeyMappers = getAlignmentKeyMappers(declarativeShadowVariableDescriptors);
+        // Entities aligned on a variable share a single node for it,
+        // so the variable is calculated once per alignment group.
+        var variableIdToUpdater =
+                alignmentKeyMappers.isEmpty() ? EntityVariableUpdaterLookup.<Solution_> entityIndependentLookup()
+                        : EntityVariableUpdaterLookup.<Solution_> groupedEntityDependentLookup(alignmentKeyMappers::get);
+        var variableIdToAlignedEntitiesMap = getAlignedEntitiesMap(declarativeShadowVariableDescriptors,
+                graphDescriptor.entities());
 
         // Create graph node for each entity/declarative shadow variable pair.
         // Maps a variable id to its source aliases;
@@ -279,9 +286,48 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         // to "startTime" of some visit, and thus alias it.
         var declarativeShadowVariableToAliasMap = createGraphNodes(
                 graphDescriptor,
-                declarativeShadowVariableDescriptors, variableIdToUpdater);
+                declarativeShadowVariableDescriptors, variableIdToUpdater, variableIdToAlignedEntitiesMap);
         return buildVariableReferenceGraph(graphDescriptor, declarativeShadowVariableDescriptors,
                 declarativeShadowVariableToAliasMap);
+    }
+
+    private static <Solution_> Map<VariableMetaModel<Solution_, ?, ?>, Function<Object, @Nullable Object>>
+            getAlignmentKeyMappers(List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors) {
+        var alignmentKeyMappers = new HashMap<VariableMetaModel<Solution_, ?, ?>, Function<Object, @Nullable Object>>();
+        for (var declarativeShadowVariableDescriptor : declarativeShadowVariableDescriptors) {
+            if (declarativeShadowVariableDescriptor.getAlignmentKeyMap() != null) {
+                alignmentKeyMappers.put(declarativeShadowVariableDescriptor.getVariableMetaModel(),
+                        declarativeShadowVariableDescriptor.getAlignmentKeyMap());
+            }
+        }
+        return alignmentKeyMappers;
+    }
+
+    /**
+     * @return for each aligned variable, the entities of each non-null alignment key
+     */
+    private static <Solution_> Map<VariableMetaModel<Solution_, ?, ?>, Map<Object, List<Object>>> getAlignedEntitiesMap(
+            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors, Object[] entities) {
+        var variableIdToAlignedEntitiesMap = new HashMap<VariableMetaModel<Solution_, ?, ?>, Map<Object, List<Object>>>();
+        for (var declarativeShadowVariableDescriptor : declarativeShadowVariableDescriptors) {
+            var alignmentKeyFunction = declarativeShadowVariableDescriptor.getAlignmentKeyMap();
+            if (alignmentKeyFunction == null) {
+                continue;
+            }
+            var entityClass = declarativeShadowVariableDescriptor.getEntityDescriptor().getEntityClass();
+            var alignmentKeyToAlignedEntitiesMap = new HashMap<Object, List<Object>>();
+            for (var entity : entities) {
+                if (entityClass.isInstance(entity)) {
+                    var alignmentKey = alignmentKeyFunction.apply(entity);
+                    if (alignmentKey != null) {
+                        alignmentKeyToAlignedEntitiesMap.computeIfAbsent(alignmentKey, k -> new ArrayList<>()).add(entity);
+                    }
+                }
+            }
+            variableIdToAlignedEntitiesMap.put(declarativeShadowVariableDescriptor.getVariableMetaModel(),
+                    alignmentKeyToAlignedEntitiesMap);
+        }
+        return variableIdToAlignedEntitiesMap;
     }
 
     private static <Solution_> VariableReferenceGraph buildVariableReferenceGraph(
@@ -443,13 +489,7 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors();
         // Use a dependent lookup; if an entity does not use groups, then all variables can share the same node.
         // If the entity use groups, then variables must be grouped into their own nodes.
-        var alignmentKeyMappers = new HashMap<VariableMetaModel<Solution_, ?, ?>, Function<Object, @Nullable Object>>();
-        for (var declarativeShadowVariableDescriptor : declarativeShadowVariableDescriptors) {
-            if (declarativeShadowVariableDescriptor.getAlignmentKeyMap() != null) {
-                alignmentKeyMappers.put(declarativeShadowVariableDescriptor.getVariableMetaModel(),
-                        declarativeShadowVariableDescriptor.getAlignmentKeyMap());
-            }
-        }
+        var alignmentKeyMappers = getAlignmentKeyMappers(declarativeShadowVariableDescriptors);
         var variableIdToUpdater =
                 alignmentKeyMappers.isEmpty() ? EntityVariableUpdaterLookup.<Solution_> entityDependentLookup()
                         : EntityVariableUpdaterLookup.<Solution_> groupedEntityDependentLookup(alignmentKeyMappers::get);
@@ -476,18 +516,29 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
     private static <Solution_> Map<VariableMetaModel<?, ?, ?>, Set<VariableSourceReference>> createGraphNodes(
             GraphDescriptor<Solution_> graphDescriptor,
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
-            EntityVariableUpdaterLookup<Solution_> variableIdToUpdaters) {
+            EntityVariableUpdaterLookup<Solution_> variableIdToUpdaters,
+            Map<VariableMetaModel<Solution_, ?, ?>, Map<Object, List<Object>>> variableIdToAlignedEntitiesMap) {
         return createGraphNodes(graphDescriptor,
                 declarativeShadowVariableDescriptors, variableIdToUpdaters,
-                (entity, declarativeShadowVariableDescriptor,
-                        variableId) -> Collections.singletonList(new VariableUpdaterInfo<>(
-                                variableId,
-                                variableIdToUpdaters.getNextId(),
-                                declarativeShadowVariableDescriptor,
-                                graphDescriptor.consistencyTracker().getDeclarativeEntityConsistencyState(
-                                        declarativeShadowVariableDescriptor.getEntityDescriptor()),
-                                declarativeShadowVariableDescriptor.getMemberAccessor(),
-                                declarativeShadowVariableDescriptor.getCalculator())));
+                (entity, declarativeShadowVariableDescriptor, variableId) -> {
+                    var updater = new VariableUpdaterInfo<>(
+                            variableId,
+                            variableIdToUpdaters.getNextId(),
+                            declarativeShadowVariableDescriptor,
+                            graphDescriptor.consistencyTracker().getDeclarativeEntityConsistencyState(
+                                    declarativeShadowVariableDescriptor.getEntityDescriptor()),
+                            declarativeShadowVariableDescriptor.getMemberAccessor(),
+                            declarativeShadowVariableDescriptor.getCalculator());
+                    var alignmentKeyToAlignedEntitiesMap = variableIdToAlignedEntitiesMap.get(variableId);
+                    if (alignmentKeyToAlignedEntitiesMap != null) {
+                        var alignmentKey = declarativeShadowVariableDescriptor.getAlignmentKeyMap().apply(entity);
+                        if (alignmentKey != null) {
+                            updater = updater.withGroupEntities(
+                                    alignmentKeyToAlignedEntitiesMap.get(alignmentKey).toArray(new Object[0]));
+                        }
+                    }
+                    return Collections.singletonList(updater);
+                });
     }
 
     private static <Solution_> Map<VariableMetaModel<?, ?, ?>, Set<VariableSourceReference>> createGraphNodes(
