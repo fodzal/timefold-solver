@@ -100,7 +100,8 @@ public final class VariableReferenceGraphBuilder<Solution_> {
             }
         }
 
-        var node = new GraphNode<>(entityRepresentative, Collections.singletonList(variableUpdater), nodeList.size(),
+        var node = new GraphNode<>(entityRepresentative,
+                Collections.<VariableUpdater<Solution_>> singletonList(variableUpdater), nodeList.size(),
                 entityId, groupEntityIds, hasDynamicEdges);
 
         if (isGroup) {
@@ -366,7 +367,7 @@ public final class VariableReferenceGraphBuilder<Solution_> {
         var sortedNodeIds = component.stream().boxed().sorted(Comparator
                 .comparingInt(orderGraph::getTopologicalOrder)
                 .thenComparingInt(Integer::intValue)).collect(Collectors.toCollection(ArrayList::new));
-        var mergedUpdaters = new ArrayList<VariableUpdaterInfo<Solution_>>();
+        var mergedUpdaters = new ArrayList<VariableUpdater<Solution_>>();
         for (var nodeId : sortedNodeIds) {
             mergedUpdaters.addAll(nodeList.get(nodeId).variableReferences());
         }
@@ -455,7 +456,7 @@ public final class VariableReferenceGraphBuilder<Solution_> {
 
         for (var cycle : nodeCycleList) {
             cycle.stream().flatMap(node -> node.variableReferences().stream())
-                    .map(VariableUpdaterInfo::id)
+                    .map(VariableUpdater::id)
                     .forEach(loopedVariables::add);
         }
 
