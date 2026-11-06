@@ -6,6 +6,7 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.IntFunction;
@@ -30,6 +31,8 @@ public abstract sealed class AbstractVariableReferenceGraph<Solution_, ChangeTra
     protected final Map<VariableMetaModel<?, ?, ?>, List<BiConsumer<AbstractVariableReferenceGraph<Solution_, ?>, Object>>> variableReferenceToAfterProcessor;
     protected final Map<VariableMetaModel<?, ?, ?>, List<ListElementSourceLocator>> listVariableReferenceToElementLocator;
     private final Map<VariableMetaModel<?, ?, ?>, VariableChangeHook> variableReferenceToHookMap;
+    // Null unless the elements of the planning list variable have no nodes of their own.
+    final @Nullable ListAggregateTracker<Solution_> listAggregateTracker;
 
     // These structures are mutable.
     protected final DynamicLinearProbeNonNegativeIntCounter[] edgeCount;
@@ -52,6 +55,7 @@ public abstract sealed class AbstractVariableReferenceGraph<Solution_, ChangeTra
         variableReferenceToBeforeProcessor = Map.copyOf(outerGraph.variableReferenceToBeforeProcessor);
         variableReferenceToAfterProcessor = Map.copyOf(outerGraph.variableReferenceToAfterProcessor);
         listVariableReferenceToElementLocator = Map.copyOf(outerGraph.listVariableReferenceToElementLocator);
+        listAggregateTracker = outerGraph.listAggregateTracker;
         edgeCount = new DynamicLinearProbeNonNegativeIntCounter[instanceCount];
         for (var i = 0; i < instanceCount; i++) {
             edgeCount[i] = new DynamicLinearProbeNonNegativeIntCounter();
@@ -104,10 +108,27 @@ public abstract sealed class AbstractVariableReferenceGraph<Solution_, ChangeTra
      */
     abstract void markChanged(GraphNode<Solution_> changed);
 
+    /**
+     * As specified by {@link VariableReferenceGraph#hasPendingChanges()}, for the graph's nodes alone.
+     */
+    abstract boolean hasPendingNodeChanges();
+
+    @Override
+    public final boolean hasPendingChanges() {
+        return hasPendingNodeChanges() || (listAggregateTracker != null && listAggregateTracker.hasPendingChanges());
+    }
+
     @Override
     public final boolean updateChanged() {
         isUpdating = true;
+        if (listAggregateTracker == null) {
+            var success = innerUpdateChanged();
+            isUpdating = false;
+            return success;
+        }
+        listAggregateTracker.classifyChanges(this);
         var success = innerUpdateChanged();
+        listAggregateTracker.endUpdate();
         isUpdating = false;
         return success;
     }
@@ -200,7 +221,9 @@ public abstract sealed class AbstractVariableReferenceGraph<Solution_, ChangeTra
         var hookMap = new LinkedHashMap<VariableMetaModel<?, ?, ?>, VariableChangeHook>();
         for (var variableReferenceSet : List.of(containingVariableReferenceSet,
                 variableReferenceToBeforeProcessor.keySet(), variableReferenceToAfterProcessor.keySet(),
-                listVariableReferenceToElementLocator.keySet())) {
+                listVariableReferenceToElementLocator.keySet(),
+                listAggregateTracker == null ? Set.<VariableMetaModel<?, ?, ?>> of()
+                        : listAggregateTracker.getMonitoredVariableSet())) {
             for (var variableReference : variableReferenceSet) {
                 hookMap.computeIfAbsent(variableReference, this::buildHook);
             }
@@ -219,7 +242,9 @@ public abstract sealed class AbstractVariableReferenceGraph<Solution_, ChangeTra
         var entityType = ((InnerVariableMetaModel<?>) variableReference).variableDescriptor().getEntityDescriptor()
                 .getEntityClass();
         return new ResolvedVariableChangeHook(entityType, nodeMap, beforeProcessorList,
-                afterProcessorList, locatorList);
+                afterProcessorList, locatorList,
+                listAggregateTracker != null && listAggregateTracker.isElementSource(variableReference),
+                listAggregateTracker != null && listAggregateTracker.isListVariable(variableReference));
     }
 
     private List<ResolvedLocator<Solution_>> resolveLocators(@Nullable List<ListElementSourceLocator> locatorList) {
@@ -249,16 +274,22 @@ public abstract sealed class AbstractVariableReferenceGraph<Solution_, ChangeTra
         private final List<BiConsumer<AbstractVariableReferenceGraph<Solution_, ?>, Object>> beforeProcessorList;
         private final List<BiConsumer<AbstractVariableReferenceGraph<Solution_, ?>, Object>> afterProcessorList;
         private final List<ResolvedLocator<Solution_>> locatorList;
+        // What the list aggregate tracker needs to hear about this variable.
+        private final boolean isAggregatedElementSource;
+        private final boolean isAggregatedList;
 
         private ResolvedVariableChangeHook(Class<?> entityType, @Nullable Map<Object, GraphNode<Solution_>> nodeMap,
                 List<BiConsumer<AbstractVariableReferenceGraph<Solution_, ?>, Object>> beforeProcessorList,
                 List<BiConsumer<AbstractVariableReferenceGraph<Solution_, ?>, Object>> afterProcessorList,
-                List<ResolvedLocator<Solution_>> locatorList) {
+                List<ResolvedLocator<Solution_>> locatorList, boolean isAggregatedElementSource,
+                boolean isAggregatedList) {
             this.entityType = entityType;
             this.nodeMap = nodeMap;
             this.beforeProcessorList = beforeProcessorList;
             this.afterProcessorList = afterProcessorList;
             this.locatorList = locatorList;
+            this.isAggregatedElementSource = isAggregatedElementSource;
+            this.isAggregatedList = isAggregatedList;
         }
 
         @Override
@@ -299,6 +330,9 @@ public abstract sealed class AbstractVariableReferenceGraph<Solution_, ChangeTra
                     }
                 }
                 processEntity(afterProcessorList, entity);
+                if (isAggregatedElementSource) {
+                    Objects.requireNonNull(listAggregateTracker).afterElementSourceChanged(entity);
+                }
             }
         }
 
@@ -351,6 +385,12 @@ public abstract sealed class AbstractVariableReferenceGraph<Solution_, ChangeTra
         @Override
         public void afterListVariableChanged(Object entity, List<Object> elementsAfterChange, int fromIndex, int toIndex) {
             updateListElementEdges(locatorList, entity, elementsAfterChange, fromIndex, toIndex, true);
+            if (isAggregatedList) {
+                Objects.requireNonNull(listAggregateTracker).afterListChanged(entity, fromIndex, toIndex);
+                // The elements have no nodes, so no list element locator marks the post-chain variables changed;
+                // their after processors on the list variable do, as they do when the graph is built.
+                processEntity(afterProcessorList, entity);
+            }
         }
 
     }

@@ -20,6 +20,7 @@ import ai.timefold.solver.core.api.domain.variable.ShadowVariable;
 import ai.timefold.solver.core.preview.api.domain.metamodel.VariableMetaModel;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 public final class VariableReferenceGraphBuilder<Solution_> {
 
@@ -34,6 +35,13 @@ public final class VariableReferenceGraphBuilder<Solution_> {
     final Map<Integer, Map<Object, GraphNode<Solution_>>> variableGroupIdToContainingNodeMap;
     final Map<VariableMetaModel<?, ?, ?>, List<ListElementSourceLocator>> listVariableReferenceToElementLocator;
     boolean isGraphFixed;
+    /**
+     * Non-null when the elements of the planning list variable have no nodes of their own,
+     * each list entity having an aggregate node standing for its elements instead;
+     * a list element source then needs no per-element edges.
+     */
+    @Nullable
+    ListAggregateTracker<Solution_> listAggregateTracker;
 
     public VariableReferenceGraphBuilder(ChangedVariableNotifier<Solution_> changedVariableNotifier) {
         this.changedVariableNotifier = changedVariableNotifier;
@@ -112,6 +120,23 @@ public final class VariableReferenceGraphBuilder<Solution_> {
             addToInstanceMaps(instanceMap, entity, node, variableUpdater);
         }
         nodeList.add(node);
+    }
+
+    /**
+     * Adds the node standing for all the elements of a list entity, see {@link ListAggregation}.
+     * It is found by the list variable and the list entity.
+     *
+     * @return the node, until {@link #build} renumbers the nodes
+     */
+    GraphNode<Solution_> addAggregateNode(Object listEntity, ListAggregateUpdater<Solution_> aggregateUpdater) {
+        var entityId = entityToEntityId.computeIfAbsent(listEntity, ignored -> entityToEntityId.size());
+        // Its edges are dynamic: the list's contents change while solving.
+        var node = new GraphNode<>(listEntity, Collections.<VariableUpdater<Solution_>> singletonList(aggregateUpdater),
+                nodeList.size(), entityId, null, true);
+        variableReferenceToContainingNodeMap.computeIfAbsent(aggregateUpdater.id(), ignored -> new IdentityHashMap<>())
+                .put(listEntity, node);
+        nodeList.add(node);
+        return node;
     }
 
     private void addToInstanceMaps(Map<Object, GraphNode<Solution_>> instanceMap,
@@ -204,7 +229,7 @@ public final class VariableReferenceGraphBuilder<Solution_> {
         var visited = new boolean[size];
         for (var nodeIds : entityToNodeIds.values()) {
             for (var startId : nodeIds.stream().toArray()) {
-                if (visited[startId] || nodeList.get(startId).groupEntityIds() != null) {
+                if (visited[startId] || !isMergeable(nodeList.get(startId))) {
                     continue;
                 }
                 var component = new BitSet();
@@ -251,10 +276,18 @@ public final class VariableReferenceGraphBuilder<Solution_> {
 
     private boolean isSameEntityNode(int nodeId, int otherId, BitSet[] backwardEdges) {
         var node = nodeList.get(nodeId);
-        if (!(node.groupEntityIds() == null && node.entity() == nodeList.get(otherId).entity())) {
+        if (!(isMergeable(node) && node.entity() == nodeList.get(otherId).entity())) {
             return false;
         }
         return countAncestorsWithDynamicEdges(nodeId, backwardEdges) == countAncestorsWithDynamicEdges(otherId, backwardEdges);
+    }
+
+    /**
+     * A node of an aligned group updates several entities, and an aggregate node walks a whole list,
+     * so neither can share a node with the variables of a single entity.
+     */
+    private static boolean isMergeable(GraphNode<?> node) {
+        return node.groupEntityIds() == null && node.variableReferences().getFirst() instanceof VariableUpdaterInfo<?>;
     }
 
     private int countAncestorsWithDynamicEdges(int nodeId, BitSet[] backwardEdges) {
@@ -424,7 +457,10 @@ public final class VariableReferenceGraphBuilder<Solution_> {
         variableReferenceToContainingNodeMap.putAll(newContainingNodeMap);
     }
 
-    private void assertNoFixedLoops() {
+    /**
+     * @return a graph of this builder's fixed edges alone, to test for a fixed loop
+     */
+    DefaultTopologicalOrderGraph newFixedEdgeGraph() {
         var graph = new DefaultTopologicalOrderGraph(nodeList.size());
         for (var fixedEdge : fixedEdges.entrySet()) {
             var fromNodeId = fixedEdge.getKey().graphNodeId();
@@ -433,7 +469,11 @@ public final class VariableReferenceGraphBuilder<Solution_> {
                 graph.addEdge(fromNodeId, toNodeId);
             }
         }
+        return graph;
+    }
 
+    private void assertNoFixedLoops() {
+        var graph = newFixedEdgeGraph();
         var changedBitSet = new BitSet();
         graph.commitChanges(changedBitSet);
 

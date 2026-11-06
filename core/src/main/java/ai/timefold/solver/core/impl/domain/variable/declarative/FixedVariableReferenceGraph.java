@@ -70,7 +70,7 @@ public final class FixedVariableReferenceGraph<Solution_>
     }
 
     @Override
-    public boolean hasPendingChanges() {
+    boolean hasPendingNodeChanges() {
         return !changeTracker.isEmpty();
     }
 

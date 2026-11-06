@@ -8,11 +8,13 @@ import org.jspecify.annotations.Nullable;
 /**
  * Updates the shadow variables of a {@link GraphNode} when the node is processed.
  * <p>
- * A node carries one {@link VariableUpdaterInfo} per declarative shadow variable,
+ * A node usually carries one {@link VariableUpdaterInfo} per declarative shadow variable,
  * which recomputes a single value for a single entity (or an aligned group of entities).
+ * An aggregate node carries a {@link ListAggregateUpdater} instead, which updates all the elements
+ * of a planning list variable's list entity, whose values differ per element and whose set changes during solving.
  */
 @NullMarked
-public sealed interface VariableUpdater<Solution_> permits VariableUpdaterInfo {
+public sealed interface VariableUpdater<Solution_> permits VariableUpdaterInfo, ListAggregateUpdater {
 
     /**
      * Identifies the node in {@link AbstractVariableReferenceGraph} lookups

@@ -187,9 +187,94 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                 }
                 yield buildSingleDirectionalParentGraph(graphDescriptor, graphStructureAndDirection);
             }
-            case ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE, NO_DYNAMIC_EDGES, ARBITRARY ->
-                buildArbitraryGraph(graphDescriptor);
+            case ARBITRARY_SINGLE_ENTITY_AT_MOST_ONE_DIRECTIONAL_PARENT_TYPE, NO_DYNAMIC_EDGES, ARBITRARY -> {
+                var aggregatedGraph = buildListAggregatedGraph(graphDescriptor);
+                yield aggregatedGraph != null ? aggregatedGraph : buildArbitraryGraph(graphDescriptor);
+            }
         };
+    }
+
+    /**
+     * Builds the arbitrary graph with the elements of the planning list variable aggregated,
+     * see {@link ListAggregation}.
+     *
+     * @return null if the elements cannot be aggregated
+     */
+    static <Solution_> @Nullable VariableReferenceGraph buildListAggregatedGraph(GraphDescriptor<Solution_> graphDescriptor) {
+        var solutionDescriptor = graphDescriptor.solutionDescriptor();
+        var aggregation = ListAggregation.of(solutionDescriptor);
+        var changedVariableNotifier = graphDescriptor.changedVariableNotifier();
+        // Walking a list needs the score director's list variable state supply.
+        var scoreDirector = changedVariableNotifier.innerScoreDirector();
+        if (aggregation == null || scoreDirector == null) {
+            return null;
+        }
+        var listVariableDescriptor = aggregation.listVariableDescriptor();
+        var listEntityDescriptor = listVariableDescriptor.getEntityDescriptor();
+        var listEntityClass = listEntityDescriptor.getEntityClass();
+        if (Arrays.stream(graphDescriptor.entities()).noneMatch(listEntityClass::isInstance)) {
+            // Without a list entity, every element is unassigned: there is nothing to aggregate.
+            return null;
+        }
+        var elementDescriptorList = aggregation.elementDescriptorList();
+        var otherDescriptorList = solutionDescriptor.getDeclarativeShadowVariableDescriptors().stream()
+                .filter(descriptor -> !elementDescriptorList.contains(descriptor))
+                .toList();
+        var elementConsistencyState = graphDescriptor.consistencyTracker()
+                .getDeclarativeEntityConsistencyState(elementDescriptorList.getFirst().getEntityDescriptor());
+        var aggregateUpdater = new ListAggregateUpdater<>(aggregation,
+                graphDescriptor.consistencyTracker().getDeclarativeEntityConsistencyState(listEntityDescriptor),
+                elementConsistencyState, topologicallySortedDeclarativeShadowVariables(elementDescriptorList),
+                hasNoNonDeclarativeSourcesFromParent(elementDescriptorList));
+        var listVariableState = scoreDirector.<Object, Object> getListVariableState(listVariableDescriptor);
+
+        // A builder of its own, so that the arbitrary graph can still be built from the original one.
+        var aggregatedGraphDescriptor = new GraphDescriptor<>(graphDescriptor.consistencyTracker(), solutionDescriptor,
+                graphDescriptor.ignoreInconsistentSolutions(), new VariableReferenceGraphBuilder<>(changedVariableNotifier),
+                graphDescriptor.entities(), graphDescriptor.graphCreator());
+        var builder = aggregatedGraphDescriptor.variableReferenceGraphBuilder();
+        builder.listAggregateTracker = new ListAggregateTracker<>(aggregation, aggregateUpdater, listVariableState,
+                elementConsistencyState, changedVariableNotifier, graphDescriptor.entities());
+        populateArbitraryGraph(aggregatedGraphDescriptor, otherDescriptorList);
+        var listVariableMetaModel = listVariableDescriptor.getVariableMetaModel();
+        for (var listEntity : graphDescriptor.entities()) {
+            if (!listEntityClass.isInstance(listEntity)) {
+                continue;
+            }
+            var aggregateNode = builder.addAggregateNode(listEntity, aggregateUpdater);
+            for (var preChainVariableId : aggregation.preChainVariableIdList()) {
+                builder.addFixedEdge(builder.lookupOrError(preChainVariableId, listEntity), aggregateNode);
+            }
+            for (var postChainVariableId : aggregation.postChainVariableIdList()) {
+                builder.addFixedEdge(aggregateNode, builder.lookupOrError(postChainVariableId, listEntity));
+            }
+        }
+        if (!builder.isGraphFixed) {
+            // A dynamic edge, such as one from a planning variable chaining the list entities,
+            // could close a dependency loop through an aggregate node while solving.
+            LOGGER.trace("The graph around the aggregate nodes is not fixed; falling back to the arbitrary graph.");
+            return null;
+        }
+        // The arbitrary graph may not have a loop through the aggregate edges: there, each element variable has
+        // a node of its own, reached through the dynamic edges of a list element source, which a move can change.
+        // An aggregate node stands for every variable of every element of its list entity instead,
+        // so failing fast on the loop would reject a model the arbitrary graph solves;
+        // the arbitrary graph fails the build fast itself on a fixed loop.
+        if (builder.newFixedEdgeGraph().commitChanges(new BitSet())) {
+            LOGGER.trace("The aggregate node edges form a dependency loop; falling back to the arbitrary graph.");
+            return null;
+        }
+        // Never empty: every list entity has an aggregate node.
+        @SuppressWarnings("unchecked")
+        var graph = (AbstractVariableReferenceGraph<Solution_, ?>) builder.build(aggregatedGraphDescriptor.graphCreator(),
+                aggregatedGraphDescriptor.ignoreInconsistentSolutions());
+        // Looked up only now: building merges the nodes of each entity, which renumbers every node.
+        for (var listEntity : graphDescriptor.entities()) {
+            if (listEntityClass.isInstance(listEntity)) {
+                aggregateUpdater.addListEntity(listEntity, builder.lookupOrError(listVariableMetaModel, listEntity));
+            }
+        }
+        return graph;
     }
 
     static <Solution_> VariableReferenceGraph buildSingleDirectionalParentGraph(
@@ -265,8 +350,14 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
     }
 
     private static <Solution_> VariableReferenceGraph buildArbitraryGraph(GraphDescriptor<Solution_> graphDescriptor) {
-        var declarativeShadowVariableDescriptors =
-                graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors();
+        populateArbitraryGraph(graphDescriptor,
+                graphDescriptor.solutionDescriptor().getDeclarativeShadowVariableDescriptors());
+        return graphDescriptor.variableReferenceGraphBuilder().build(graphDescriptor.graphCreator(),
+                graphDescriptor.ignoreInconsistentSolutions());
+    }
+
+    private static <Solution_> void populateArbitraryGraph(GraphDescriptor<Solution_> graphDescriptor,
+            List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors) {
         // Create one graph node per entity/declarative shadow variable pair;
         // the graph builder merges the nodes of an entity where the edges allow it.
         // Maps a variable id to its source aliases;
@@ -276,11 +367,11 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         var declarativeShadowVariableToAliasMap = createGraphNodes(
                 graphDescriptor,
                 declarativeShadowVariableDescriptors);
-        return buildVariableReferenceGraph(graphDescriptor, declarativeShadowVariableDescriptors,
+        populateVariableReferenceGraph(graphDescriptor, declarativeShadowVariableDescriptors,
                 declarativeShadowVariableToAliasMap);
     }
 
-    private static <Solution_> VariableReferenceGraph buildVariableReferenceGraph(
+    private static <Solution_> void populateVariableReferenceGraph(
             GraphDescriptor<Solution_> graphDescriptor,
             List<DeclarativeShadowVariableDescriptor<Solution_>> declarativeShadowVariableDescriptors,
             VariableAliasMapping variableAliasMapping) {
@@ -298,8 +389,6 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
         // Create the fixed edges in the graph
         createFixedVariableRelationEdges(graphDescriptor.variableReferenceGraphBuilder(), graphDescriptor.entities(),
                 declarativeShadowVariableDescriptors);
-        return graphDescriptor.variableReferenceGraphBuilder().build(graphDescriptor.graphCreator(),
-                graphDescriptor.ignoreInconsistentSolutions());
     }
 
     private record VariableAliasMapping(Map<VariableMetaModel<?, ?, ?>, Set<VariableSourceReference>> backingMap) {
@@ -524,6 +613,11 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                                 graph.markChanged(changed);
                             }
                         });
+        if (graphDescriptor.variableReferenceGraphBuilder().listAggregateTracker != null) {
+            // The elements have no nodes: their aggregate node has an edge to the target variable instead,
+            // so no fan-in edges are needed, and the graph stays fixed if nothing else needs dynamic edges.
+            return;
+        }
         // Maintain the fan-in edges (element.sourceVariable -> entity.targetVariable)
         // when the list variable changes.
         var elementSource = source.variableSourceReferences().getFirst();
@@ -606,6 +700,10 @@ public class DefaultShadowVariableSessionFactory<Solution_> {
                             // the graph is built and are removed/added as it changes during solving,
                             // so they must not be treated as fixed by the fixed-loop fail-fast.
                             var isListElementSource = sourceRoot.parentVariableType() == ParentVariableType.LIST_ELEMENT;
+                            if (isListElementSource && variableReferenceGraphBuilder.listAggregateTracker != null) {
+                                // The elements have no nodes: their aggregate node covers this source.
+                                break;
+                            }
                             sourceRoot.valueEntityFunction()
                                     .accept(entity, fromEntity -> {
                                         var from = variableReferenceGraphBuilder.lookupOrError(fromVariableId, fromEntity);

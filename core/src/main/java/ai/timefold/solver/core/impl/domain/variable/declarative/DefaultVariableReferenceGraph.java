@@ -60,7 +60,7 @@ final class DefaultVariableReferenceGraph<Solution_> extends AbstractVariableRef
     }
 
     @Override
-    public boolean hasPendingChanges() {
+    boolean hasPendingNodeChanges() {
         return !changeTracker.isEmpty();
     }
 
